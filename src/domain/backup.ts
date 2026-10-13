@@ -186,7 +186,7 @@ function draft(value: unknown, path: string, reps: boolean): string {
     fail(path, "exceeds the supported range");
   return result;
 }
-function validate(value: unknown): AppData {
+export function validateData(value: unknown, previous?: AppData): AppData {
   const data = object(value, "backup", [
     "schemaVersion",
     "settings",
@@ -293,8 +293,11 @@ function validate(value: unknown): AppData {
     revisions.map((item) => item.effectiveDate),
     "scheduleRevisions.effectiveDate",
   );
+  const unchangedSessions = new Set(previous?.sessions.filter(Object.isFrozen));
   const sessions = array(data.sessions, "sessions", 20000).map(
     (value, index) => {
+      if (unchangedSessions.has(value as AppData["sessions"][number]))
+        return value as ObjectValue;
       const at = `sessions[${index}]`;
       const item = object(value, at, [
         "id",
@@ -437,7 +440,7 @@ function validate(value: unknown): AppData {
   return data as unknown as AppData;
 }
 function byteLength(text: string): number {
-  // Avoid a Node Buffer dependency in React Native. Count UTF-8 bytes, including surrogate pairs.
+  // Count UTF8 bytes without adding a native dependency
   let bytes = 0;
   for (let index = 0; index < text.length; index++) {
     const point = text.charCodeAt(index);
@@ -474,11 +477,11 @@ export function parseBackup(text: string): AppData {
       "This file is not valid JSON. Choose a Workout backup exported from Settings.",
     );
   }
-  return validate(value);
+  return validateData(value);
 }
 export function serializeBackup(data: AppData): string {
-  validate(data);
-  const text = JSON.stringify(data, null, 2);
+  validateData(data);
+  const text = JSON.stringify(data);
   if (byteLength(text) > MAX_BACKUP_BYTES)
     throw new Error("Backup exceeds the 10 MiB size limit.");
   return text;

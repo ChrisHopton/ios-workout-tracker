@@ -1,10 +1,11 @@
-/** Serializes durable writes. Treat each enqueued snapshot as immutable. */
+// Queued snapshots must be immutable
 export class SaveQueue<T> {
   private tail: Promise<void> = Promise.resolve();
   private latest: { snapshot: T } | undefined;
   private failure: unknown;
   private failed = false;
   private replacing = false;
+  private pending: { snapshot: T; promise: Promise<void> } | undefined;
   constructor(private readonly writer: (snapshot: T) => Promise<void>) {}
   private append(write: () => Promise<void>): Promise<void> {
     const operation = this.tail.then(async () => {
@@ -18,7 +19,7 @@ export class SaveQueue<T> {
         throw error;
       }
     });
-    // A failed write must not poison the chain or block a later, newer snapshot.
+    // Allow newer snapshots to save after a failed write
     this.tail = operation.catch(() => undefined);
     return operation;
   }
@@ -28,14 +29,23 @@ export class SaveQueue<T> {
         new Error("Please wait for the backup to finish restoring."),
       );
     this.latest = { snapshot };
-    return this.append(() => this.writer(snapshot));
+    if (this.pending) {
+      this.pending.snapshot = snapshot;
+      return this.pending.promise;
+    }
+    const pending = { snapshot, promise: Promise.resolve() };
+    pending.promise = this.append(async () => {
+      this.pending = undefined;
+      await this.writer(pending.snapshot);
+    });
+    this.pending = pending;
+    return pending.promise;
   }
-  /** The writer must replace its durable value atomically, as SQLite's single UPDATE does. */
   replace(snapshot: T, currentSnapshot: T): Promise<void> {
     if (this.replacing)
       return Promise.reject(new Error("A restore is already running."));
     this.replacing = true;
-    // A restore before the first edit still needs a known current value for failure recovery.
+    // Keep a recovery snapshot when restoring before the first edit
     this.latest ??= { snapshot: currentSnapshot };
     return this.append(async () => {
       await this.writer(snapshot);

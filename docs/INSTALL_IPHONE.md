@@ -2,14 +2,16 @@
 
 The `preview` profile creates a standalone private iPhone app with its JavaScript and assets bundled. After installation, recording and analytics work offline with your Windows PC switched off. This is an EAS internal distribution build. [Expo's preview-build guide](https://docs.expo.dev/tutorial/eas/internal-distribution-builds/)
 
-These instructions are prepared for the owner to run. No Apple account has been enrolled, no device has been registered, and no signed iOS build has been installed as part of writing this guide.
+These instructions are prepared for the owner to run. No Apple account has been enrolled, no device has been registered, and no signed iOS build has been installed as part of writing this guide. Optional Google Sheets setup is separate from Apple signing; app users do not sign in to Google.
+
+This version adds the native `expo-secure-store` module for connection credentials. Create and install a new EAS binary even if an earlier Workout build is already on the phone. An over-the-air JavaScript update cannot add a native module that the installed binary lacks. [Expo native rebuild guidance](https://docs.expo.dev/develop/development-builds/introduction/#rebuild-when-native-code-changes)
 
 ## 1. Accounts and prerequisites
 
 - Your iPhone must run **iOS 16.4 or newer**.
 - Use an Expo account and an active Apple Developer Program membership. Apple lists **US $99 per membership year**, with regional pricing. You complete enrollment, payment, Apple sign-in, and two-factor prompts yourself. [Apple enrollment](https://developer.apple.com/programs/enroll/)
 - EAS builds run in Expo's cloud. Build availability, quotas, and paid options depend on your account; check before starting a build. [EAS build setup](https://docs.expo.dev/build/setup/)
-- Install Node.js LTS and Git for Windows if needed. Keep Apple passwords, codes, certificates, and provisioning files out of source control and chat messages.
+- Install Node.js 22.18 or a newer supported LTS release and Git for Windows if needed. Keep Apple passwords, codes, certificates, and provisioning files out of source control and chat messages.
 
 ## 2. Prepare and link the project
 
@@ -52,6 +54,13 @@ If prompted, open **Settings > Privacy & Security > Developer Mode**, turn it on
 
 Stop the PC's development server and test Workout in airplane mode. Create a plan, record values, wait for **Saved**, force-close, and reopen. Finish the [device checklist](DEVICE_CHECKLIST.md).
 
+## Optional private Google Sheets connection
+
+Follow [Private Google Sheets sync](GOOGLE_SHEETS.md) after the owner authorizes and deploys the Apps Script server. Keep the workbook private. The owner configures only device IDs and token hashes, and gives each phone its own private connection code. Credentials are not part of the EAS build, app bundle, or public environment variables.
+
+In Workout's **Settings > Google Sheets**, paste that phone's code, set a recognizable phone label, review the profile and full-history upload explanation, and explicitly consent before connecting. This uploads optional profile fields and journal rows to the spreadsheet owner. Recording and analytics continue to work offline; pending uploads retry when the app is open. Local Saved and uploaded Up to date are separate states.
+
+Complete the real endpoint and two-phone checks in the [device checklist](DEVICE_CHECKLIST.md). The browser demo does not send data to Google. The cloud copy is for reporting; keep JSON exports for phone recovery because the app does not download or restore a journal from Sheets.
 ## Updates, signing expiry, and a second person
 
 Export a backup before every update. Re-run the preview build command after source changes and install over the existing app using the same bundle identifier and Apple team. Do not uninstall first; uninstalling removes local app storage. There is no automatic over-the-air update configuration in this version.
@@ -70,7 +79,7 @@ For the second person, run `device:create` for their iPhone, then create a new p
 npx eas-cli@latest build:resign --platform ios
 ```
 
-Give them that newly signed build's installation link. Their data starts empty and stays separate. Internal build links can allow access without an Expo login by default; change this in the project's Expo settings if desired. Newly enrolled/renewed Apple accounts can encounter Apple's 24–72-hour processing delay for a new device; rebuild/re-sign after it clears. [Device registration and access](https://docs.expo.dev/build/internal-distribution/)
+Give them that newly signed build's installation link. Their journal starts empty and stays separate. If both phones upload to Sheets, provide a different device code and phone label for each; never connect both under the same device ID. Internal build links can allow access without an Expo login by default; change this in the project's Expo settings if desired. Newly enrolled/renewed Apple accounts can encounter Apple's 24–72-hour processing delay for a new device; rebuild/re-sign after it clears. [Device registration and access](https://docs.expo.dev/build/internal-distribution/)
 
 ## Development preview and troubleshooting
 

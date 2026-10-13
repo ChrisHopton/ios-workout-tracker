@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { View } from "react-native";
 import { useApp } from "../../data/store";
 import { summarize } from "../../domain/analytics";
@@ -21,7 +21,11 @@ export default function Analytics() {
   const [weeks, setWeeks] = useState(8);
   const [group, setGroup] = useState<MuscleGroup>("Legs");
   const [exerciseId, setExerciseId] = useState("");
-  const result = summarize(data, weeks, today(), data.settings.unit);
+  const endDate = today();
+  const result = useMemo(
+    () => summarize(data, weeks, endDate, data.settings.unit),
+    [data, weeks, endDate],
+  );
   const history =
     result.exerciseHistory.find((e) => e.exerciseId === exerciseId) ??
     result.exerciseHistory[0];

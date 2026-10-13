@@ -73,33 +73,38 @@ export function summarize(
     )
     .sort((a, b) => a.date.localeCompare(b.date));
   const groups = emptyGroups();
+  const weeksByStart = new Map(weekly.map((week) => [week.startDate, week]));
+  const completedScheduleKeys = new Set<string>();
   const exerciseHistory = new Map<string, ExerciseHistory>();
   for (const session of completed) {
-    const week = weekly.find(
-      (item) => item.startDate === mondayOf(session.date),
-    )!;
+    completedScheduleKeys.add(session.date + ":" + session.templateId);
+    const week = weeksByStart.get(mondayOf(session.date))!;
     week.completedWorkouts += 1;
     for (const exercise of session.exercises) {
       const isBodyweight = exercise.exercise.equipment === "bodyweight";
-      const sets = exercise.sets.filter(
-        (set) =>
-          set.status === "completed" &&
-          numericReps(set.reps) !== null &&
-          (isBodyweight || numericWeight(set.weight) !== null),
-      );
-      groups[exercise.exercise.group] += sets.length;
-      week.setsByGroup[exercise.exercise.group] += sets.length;
-      week.totalSets += sets.length;
-      if (!sets.length) continue;
-      const ranked = sets
-        .map((set) => ({
-          weight: isBodyweight
+      let setCount = 0;
+      let best: { weight: number | null; reps: number } | null = null;
+      for (const set of exercise.sets) {
+        if (set.status !== "completed") continue;
+        const reps = numericReps(set.reps);
+        const recordedWeight = isBodyweight ? null : numericWeight(set.weight);
+        if (reps === null || (!isBodyweight && recordedWeight === null)) continue;
+        const weight =
+          recordedWeight === null
             ? null
-            : convertWeight(numericWeight(set.weight)!, session.unit, unit),
-          reps: numericReps(set.reps)!,
-        }))
-        .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0) || b.reps - a.reps);
-      const best = ranked[0];
+            : convertWeight(recordedWeight, session.unit, unit);
+        setCount += 1;
+        if (
+          !best ||
+          (weight ?? 0) > (best.weight ?? 0) ||
+          ((weight ?? 0) === (best.weight ?? 0) && reps > best.reps)
+        )
+          best = { weight, reps };
+      }
+      groups[exercise.exercise.group] += setCount;
+      week.setsByGroup[exercise.exercise.group] += setCount;
+      week.totalSets += setCount;
+      if (!best) continue;
       const history = exerciseHistory.get(exercise.exercise.id) ?? {
         exerciseId: exercise.exercise.id,
         name: exercise.exercise.name,
@@ -108,13 +113,12 @@ export function summarize(
         points: [],
         heaviestSet: null,
       };
-      // Use the latest snapshot name while retaining actual historical weights and dates.
       history.name = exercise.exercise.name;
       history.points.push({
         date: session.date,
         weight: best.weight,
         reps: best.reps,
-        sets: sets.length,
+        sets: setCount,
       });
       if (
         best.weight !== null &&
@@ -138,12 +142,7 @@ export function summarize(
     const planned = scheduleForDate(data, date);
     if (planned) {
       scheduledWorkouts += 1;
-      if (
-        completed.some(
-          (session) =>
-            session.date === date && session.templateId === planned.id,
-        )
-      )
+      if (completedScheduleKeys.has(date + ":" + planned.id))
         completedScheduledWorkouts += 1;
     }
   }

@@ -15,6 +15,7 @@ import {
   Txt,
   useTheme,
 } from "../../components/ui";
+import { SyncSettings } from "../../components/SyncSettings";
 import { SaveIndicator } from "../../components/SaveIndicator";
 
 type HeightFields = { cm: string; feet: string; inches: string };
@@ -60,7 +61,7 @@ export default function Settings() {
   const [height, setHeight] = useState(() =>
     heightFields(data.settings.heightCm),
   );
-  // Retain the exact value separately from rounded display fields, including converted drafts.
+  // Keep exact height separately from rounded display fields
   const [canonicalHeight, setCanonicalHeight] = useState(
     data.settings.heightCm,
   );
@@ -105,7 +106,6 @@ export default function Settings() {
   function chooseUnit(unit: Unit) {
     if (busyRef.current || unit === data.settings.unit) return;
     void action(async () => {
-      // Validate and convert the draft before changing units; invalid input stays editable.
       const cm = currentHeight();
       update((current) => ({
         ...current,
@@ -212,7 +212,7 @@ export default function Settings() {
       <Card>
         <SectionTitle>Your profile</SectionTitle>
         <Txt muted style={{ fontSize: 13 }}>
-          Optional, and stored only on this phone.
+          Optional. Included in Google Sheets when connected.
         </Txt>
         <Field
           label="Age"
@@ -364,6 +364,7 @@ export default function Settings() {
           </>
         )}
       </Card>
+      <SyncSettings disabled={busy} />
       <Card>
         <SectionTitle>Backup & restore</SectionTitle>
         <Txt muted style={{ fontSize: 13 }}>
@@ -431,8 +432,8 @@ export default function Settings() {
       <Card>
         <Txt bold>Workout · 1.0</Txt>
         <Txt muted style={{ fontSize: 13 }}>
-          Your routine stays on your device. No account, no subscription inside
-          the app, and no training data sent to a server.
+          Your routine saves on this phone. Google Sheets uploads are optional
+          and use a private connection code without app sign-in.
         </Txt>
         <Txt muted style={{ fontSize: 12 }}>
           Progression suggestions are simple training heuristics. You always

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Alert, Pressable, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useApp } from "../data/store";
 import { formatDate, today } from "../domain/dates";
 import { finishSession, validateSet } from "../domain/sessions";
@@ -86,7 +86,8 @@ export default function RecordWorkout() {
     try {
       change((s) => finishSession(s, skip));
       await flush();
-      router.back();
+      if (router.canGoBack()) router.back();
+      else router.replace("/");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to finish.");
     } finally {
@@ -101,7 +102,8 @@ export default function RecordWorkout() {
     try {
       if (status === "error") await retry();
       await flush();
-      router.back();
+      if (router.canGoBack()) router.back();
+      else router.replace("/");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Please retry saving.");
     } finally {

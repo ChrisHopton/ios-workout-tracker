@@ -12,21 +12,20 @@
       "bundleIdentifier": "com.chopton.workout.personal",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "deploymentTarget": "16.4"
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite",
-      "expo-document-picker",
       [
-        "expo-build-properties",
+        "expo-sqlite",
         {
-          "ios": {
-            "deploymentTarget": "16.4"
-          }
+          "enableFTS": false
         }
       ],
-      "expo-font"
+      "expo-document-picker",
+      "expo-sharing",
+      "expo-secure-store"
     ],
     "web": {
       "bundler": "metro",

@@ -1,6 +1,6 @@
 const DAY_MS = 86_400_000;
 
-/** Calendar-only parsing: never interpret stored workout dates in the device timezone. */
+// Use UTC arithmetic so daylight saving changes cannot shift calendar dates
 export function parseDate(date: string): Date {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
     throw new Error("Use a valid date in YYYY-MM-DD format.");
@@ -27,12 +27,11 @@ export function addDays(date: string, days: number): string {
     .slice(0, 10);
 }
 
-/** Positive if a occurs after b. Immune to daylight-saving changes. */
 export function dayDifference(a: string, b: string): number {
   return (parseDate(a).getTime() - parseDate(b).getTime()) / DAY_MS;
 }
 
-/** Monday = 0, Sunday = 6. */
+// Monday is zero and Sunday is six
 export function weekdayIndex(date: string): number {
   return (parseDate(date).getUTCDay() + 6) % 7;
 }

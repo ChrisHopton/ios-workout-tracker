@@ -20,6 +20,7 @@ test("serializes rapid writes so stale snapshots cannot overwrite newer snapshot
     active--;
   });
   const first = queue.enqueue(1);
+  await Promise.resolve();
   const second = queue.enqueue(2);
   const third = queue.enqueue(3);
   await Promise.resolve();
@@ -27,14 +28,7 @@ test("serializes rapid writes so stale snapshots cannot overwrite newer snapshot
   gate.release();
   await Promise.all([first, second, third]);
   await queue.flush();
-  assert.deepEqual(events, [
-    "start 1",
-    "end 1",
-    "start 2",
-    "end 2",
-    "start 3",
-    "end 3",
-  ]);
+  assert.deepEqual(events, ["start 1", "end 1", "start 3", "end 3"]);
 });
 test("flush exposes last failure and retry writes the latest snapshot", async () => {
   let fails = true;
@@ -57,6 +51,7 @@ test("failure does not poison a later save and newest success clears failure", a
     if (value === 1) throw new Error("first fails");
   });
   const first = queue.enqueue(1);
+  await Promise.resolve();
   const second = queue.enqueue(2);
   await assert.rejects(first, /first fails/);
   await second;
@@ -72,6 +67,7 @@ test("retry chooses the newest failed snapshot rather than the earlier one", asy
     if (fail) throw new Error("offline storage");
   });
   const first = queue.enqueue(1).catch(() => undefined);
+  await Promise.resolve();
   const second = queue.enqueue(2).catch(() => undefined);
   await Promise.all([first, second]);
   fail = false;
@@ -89,6 +85,7 @@ test("flush includes writes enqueued while waiting and no-op retry before first 
   await queue.retry();
   await queue.flush();
   const first = queue.enqueue(1);
+  await Promise.resolve();
   const flush = queue.flush();
   const second = queue.enqueue(2);
   gate.release();
@@ -129,7 +126,7 @@ test("failed restore keeps current data and retry writes current, never imported
     if (value === "imported") throw new Error("restore failed");
     disk = value;
   });
-  // No preceding enqueue: opening the app and immediately restoring must still be recoverable.
+  // Restore failure must recover even before the first edit
   await assert.rejects(queue.replace("imported", "current"), /restore failed/);
   assert.equal(disk, "current");
   await assert.rejects(queue.flush(), /restore failed/);
@@ -178,4 +175,25 @@ test("restore failure preserves the latest pre-restore draft even when its save 
   await queue.retry();
   assert.equal(disk, "unsaved draft");
   assert.deepEqual(writes, ["unsaved draft", "imported", "unsaved draft"]);
+});
+
+test("a burst shares one pending save and settles only after its newest snapshot is durable", async () => {
+  const gate = deferred();
+  const written: number[] = [];
+  const queue = new SaveQueue<number>(async (value) => {
+    await gate.promise;
+    written.push(value);
+  });
+  const saves = Array.from({ length: 100 }, (_, index) => queue.enqueue(index));
+  let settled = false;
+  void saves[0].then(() => {
+    settled = true;
+  });
+  await Promise.resolve();
+  assert.equal(settled, false);
+  gate.release();
+  await Promise.all(saves);
+  await queue.flush();
+  assert.deepEqual(written, [99]);
+  assert.equal(settled, true);
 });

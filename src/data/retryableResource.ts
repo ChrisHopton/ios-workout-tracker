@@ -1,4 +1,4 @@
-/** Shares an in-flight open, caching success while allowing a fresh attempt after failure. */
+// Share pending opens but allow another attempt after failure
 export function createRetryableResource<T>(
   open: () => Promise<T>,
 ): () => Promise<T> {

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Keyboard,
@@ -105,49 +105,53 @@ export default function WorkoutEditor() {
     setDirty(true);
     setMessage(null);
   }
-  function draftTemplate(preview = false): WorkoutTemplate {
-    return {
-      id,
-      title: title.trim() || (preview ? "New workout" : ""),
-      weekdays: [...weekdays].sort((a, b) => a - b),
-      archived: false,
-      updatedAt: new Date().toISOString(),
-      exercises: exercises.map((item) => ({
-        exerciseId: item.exerciseId,
-        sets: Number(item.sets) || 1,
-        repMin: Number(item.repMin) || 1,
-        repMax: Number(item.repMax) || 1,
-      })),
-    };
-  }
-  function applyDraft(current: AppData, template: WorkoutTemplate): AppData {
-    const conflict = template.weekdays.find(
-      (day) =>
-        current.templates.filter(
-          (item) =>
-            item.id !== template.id &&
-            !item.archived &&
-            item.weekdays.includes(day),
-        ).length >= 2,
-    );
-    if (conflict !== undefined)
-      throw new Error(
-        WEEKDAYS[conflict] +
-          " already has two workouts. Choose another day or edit its existing plans.",
+  const draftTemplate = useCallback(
+    (preview = false): WorkoutTemplate => {
+      return {
+        id,
+        title: title.trim() || (preview ? "New workout" : ""),
+        weekdays: [...weekdays].sort((a, b) => a - b),
+        archived: false,
+        updatedAt: new Date().toISOString(),
+        exercises: exercises.map((item) => ({
+          exerciseId: item.exerciseId,
+          sets: Number(item.sets) || 1,
+          repMin: Number(item.repMin) || 1,
+          repMax: Number(item.repMax) || 1,
+        })),
+      };
+    },
+    [id, title, weekdays, exercises],
+  );
+  const applyDraft = useCallback(
+    (current: AppData, template: WorkoutTemplate): AppData => {
+      const conflict = template.weekdays.find(
+        (day) =>
+          current.templates.filter(
+            (item) =>
+              item.id !== template.id &&
+              !item.archived &&
+              item.weekdays.includes(day),
+          ).length >= 2,
       );
-    let next = saveTemplate(current, template, date);
-    for (const weekday of swaps) next = swapWeekday(next, weekday, date);
-    return next;
-  }
+      if (conflict !== undefined)
+        throw new Error(
+          WEEKDAYS[conflict] +
+            " already has two workouts. Choose another day or edit its existing plans.",
+        );
+      let next = saveTemplate(current, template, date);
+      for (const weekday of swaps) next = swapWeekday(next, weekday, date);
+      return next;
+    },
+    [date, swaps],
+  );
   const preview = useMemo(() => {
     try {
       return { data: applyDraft(data, draftTemplate(true)), error: null };
     } catch (error) {
       return { data: null, error: errorText(error) };
     }
-    // Preview intentionally tracks all local draft inputs; nothing is persisted here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, title, weekdays, exercises, swaps, date]);
+  }, [data, applyDraft, draftTemplate]);
   const previewRevision = preview.data?.scheduleRevisions.at(-1);
   const alternatingDays =
     previewRevision?.slots
@@ -281,7 +285,7 @@ export default function WorkoutEditor() {
       const template = draftTemplate();
       update((current) => applyDraft(current, template));
       setPendingCommit("save");
-      // The optimistic state already contains these swaps, including when a write fails.
+      // Retry must not apply the same swaps twice
       setSwaps([]);
       await flush();
       setPendingCommit(null);

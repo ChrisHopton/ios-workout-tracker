@@ -6,6 +6,7 @@ import {
   Unit,
   WeightSuggestion,
   WorkoutExercise,
+  WorkoutSession,
 } from "./types";
 
 export function convertWeight(value: number, from: Unit, to: Unit): number {
@@ -68,18 +69,24 @@ export function suggestWeights(
       reason:
         "Bodyweight exercise: record reps. Added weight is not suggested automatically.",
     };
-  const history = data.sessions
-    .filter((session) => session.date < date)
-    .sort(
-      (a, b) =>
-        b.date.localeCompare(a.date) || b.startedAt.localeCompare(a.startedAt),
-    )
-    .flatMap((session) =>
-      session.exercises
-        .filter((item) => comparable(item, target, exercise))
-        .map((item) => ({ session, item })),
-    );
-  const latest = history[0];
+  type HistoryEntry = { session: WorkoutSession; item: SessionExercise };
+  let latest: HistoryEntry | undefined;
+  let previous: HistoryEntry | undefined;
+  const isNewer = (session: WorkoutSession, entry: HistoryEntry) =>
+    (session.date.localeCompare(entry.session.date) ||
+      session.startedAt.localeCompare(entry.session.startedAt)) > 0;
+  for (const session of data.sessions) {
+    if (session.date >= date) continue;
+    for (const item of session.exercises) {
+      if (!comparable(item, target, exercise)) continue;
+      if (!latest || isNewer(session, latest)) {
+        previous = latest;
+        latest = { session, item };
+      } else if (!previous || isNewer(session, previous)) {
+        previous = { session, item };
+      }
+    }
+  }
   if (!latest)
     return {
       weights: blank,
@@ -101,7 +108,6 @@ export function suggestWeights(
     return repeat(
       "Your last comparable workout was over 28 days ago. Repeat or lower the previous weight as needed.",
     );
-  const previous = history[1];
   if (!previous)
     return repeat(
       "Repeat the previous weights. Two complete workouts at the upper rep target are needed before an increase.",

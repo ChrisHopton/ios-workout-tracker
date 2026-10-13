@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { ActivityIndicator, AppState, View } from "react-native";
 import { AppData, SaveStatus } from "../domain/types";
-import { parseBackup } from "../domain/backup";
+import { snapshot } from "./snapshot";
 import { SaveQueue } from "./saveQueue";
 import { loadData, writeData } from "./persistence";
 import { Button, Txt, useTheme } from "../components/ui";
@@ -34,7 +34,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   async function load() {
     setLoadError(null);
     try {
-      const next = await loadData();
+      const next = snapshot(await loadData());
       dataRef.current = next;
       setData(next);
     } catch (e) {
@@ -48,8 +48,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     void loadData().then(
       (next) => {
         if (active) {
-          dataRef.current = next;
-          setData(next);
+          dataRef.current = snapshot(next);
+          setData(dataRef.current);
         }
       },
       (e) => {
@@ -73,8 +73,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (restoring.current)
       throw new Error("Please wait for the backup to finish restoring.");
     if (!dataRef.current) throw new Error("Your workouts are still loading.");
-    // Validate and detach the snapshot before displaying it or scheduling a durable write.
-    const next = parseBackup(JSON.stringify(fn(dataRef.current)));
+    const next = snapshot(fn(dataRef.current), dataRef.current);
+    if (next === dataRef.current) return;
     dataRef.current = next;
     setData(next);
     setStatus("saving");
@@ -120,7 +120,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   async function replace(value: AppData) {
     if (restoring.current) throw new Error("A restore is already running.");
     if (!dataRef.current) throw new Error("Your workouts are still loading.");
-    const next = parseBackup(JSON.stringify(value));
+    const next = snapshot(value);
     const current = dataRef.current;
     restoring.current = true;
     const v = ++version.current;
@@ -128,7 +128,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     try {
       await queue.replace(next, current);
-      // Imported data becomes visible only after the complete snapshot has been committed.
+      // Show imported data only after the transaction commits
       dataRef.current = next;
       setData(next);
       if (v === version.current) {
