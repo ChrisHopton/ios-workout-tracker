@@ -50,8 +50,9 @@ export const EXERCISE_LIBRARY: ExerciseDefinition[] = entries.map(
 );
 export function initialData(): AppData {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     settings: { age: "", gender: "", heightCm: null, unit: "lb" },
+    bodyWeights: [],
     exercises: EXERCISE_LIBRARY.map((e) => ({ ...e })),
     templates: [],
     scheduleRevisions: [],

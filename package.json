@@ -4,14 +4,15 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/vector-icons": "15.1.1",
-    "expo": "57.0.28",
-    "expo-constants": "57.0.21",
+    "expo": "57.0.29",
+    "expo-constants": "57.0.22",
+    "expo-crypto": "57.0.4",
     "expo-dev-client": "57.0.20",
     "expo-document-picker": "57.0.3",
     "expo-file-system": "57.0.7",
     "expo-font": "57.0.4",
-    "expo-linking": "57.0.12",
-    "expo-router": "57.0.26",
+    "expo-linking": "57.0.13",
+    "expo-router": "57.0.27",
     "expo-secure-store": "57.0.4",
     "expo-sharing": "57.0.23",
     "expo-sqlite": "57.0.4",
@@ -33,7 +34,11 @@
     "eslint": "9.39.5",
     "eslint-config-expo": "57.0.2",
     "tsx": "4.23.15",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "firebase-admin": "13.7.0",
+    "firebase": "12.10.0",
+    "@firebase/rules-unit-testing": "5.0.2",
+    "firebase-tools": "15.33.0"
   },
   "scripts": {
     "start": "expo start",
@@ -46,7 +51,14 @@
     "export:ios": "expo export --platform ios",
     "build:ios": "npx eas-cli@latest build --platform ios --profile preview",
     "measure": "tsx scripts/measure.ts",
-    "sheets:setup": "tsx scripts/sheetsSetup.ts"
+    "firebase:setup": "tsx scripts/firebaseSetup.ts",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-workout-sync \"tsx --test tests/firestoreRules.test.ts\"",
+    "firebase:deploy": "firebase deploy --only firestore"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "@firebase/app": "0.14.9",
+    "@firebase/app-compat": "0.5.9",
+    "@firebase/database-compat": "2.1.1"
+  }
 }

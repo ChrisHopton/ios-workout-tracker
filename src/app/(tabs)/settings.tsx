@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Alert, View } from "react-native";
 import { useApp } from "../../data/store";
 import { parseBackup, serializeBackup } from "../../domain/backup";
-import { exportFile, importFile } from "../../data/backupIO";
+import { exportFile, importFile, migrationBackupAvailable, exportMigrationBackup } from "../../data/backupIO";
 import { AppData, Unit } from "../../domain/types";
 import {
   Button,
@@ -16,6 +16,7 @@ import {
   useTheme,
 } from "../../components/ui";
 import { SyncSettings } from "../../components/SyncSettings";
+import { BodyWeightSettings } from "../../components/BodyWeightSettings";
 import { SaveIndicator } from "../../components/SaveIndicator";
 
 type HeightFields = { cm: string; feet: string; inches: string };
@@ -212,7 +213,7 @@ export default function Settings() {
       <Card>
         <SectionTitle>Your profile</SectionTitle>
         <Txt muted style={{ fontSize: 13 }}>
-          Optional. Included in Google Sheets when connected.
+          Optional. Included in database when connected.
         </Txt>
         <Field
           label="Age"
@@ -364,9 +365,22 @@ export default function Settings() {
           </>
         )}
       </Card>
+      <BodyWeightSettings disabled={busy} />
       <SyncSettings disabled={busy} />
       <Card>
         <SectionTitle>Backup & restore</SectionTitle>
+        {migrationBackupAvailable() && (
+          <Button
+            title="Export pre-migration backup"
+            secondary
+            disabled={busy}
+            onPress={() => {
+              void exportMigrationBackup().then(() => setMessage("Pre-migration backup shared.")).catch((error: unknown) => {
+                setMessage(error instanceof Error ? error.message : "Unable to share the backup.");
+              });
+            }}
+          />
+        )}
         <Txt muted style={{ fontSize: 13 }}>
           Keep a copy in Files before replacing your phone or deleting the app.
           Backups include your profile and complete workout history.
@@ -432,7 +446,7 @@ export default function Settings() {
       <Card>
         <Txt bold>Workout · 1.0</Txt>
         <Txt muted style={{ fontSize: 13 }}>
-          Your routine saves on this phone. Google Sheets uploads are optional
+          Your routine saves on this phone. Database uploads are optional
           and use a private connection code without app sign-in.
         </Txt>
         <Txt muted style={{ fontSize: 12 }}>

@@ -51,6 +51,7 @@ export function startSession(
           data.settings.unit,
         ),
         sets: Array.from({ length: target.sets }, () => ({
+          classification: "working" as const,
           weight: "",
           reps: "",
           status: "pending" as const,

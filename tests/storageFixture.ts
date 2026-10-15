@@ -20,10 +20,12 @@ export function historyFixture(count = 1000): AppData {
       exercise: { ...exercise },
       target: { exerciseId: exercise.id, sets: 3, repMin: 8, repMax: 12 },
       suggestion: {
+        algorithmVersion: 1,
         weights: [100, 100, 100],
         reason: "Repeat your last comparable workout weights",
       },
       sets: Array.from({ length: 3 }, () => ({
+        classification: "working",
         weight: "100",
         reps: "12",
         status: "completed",

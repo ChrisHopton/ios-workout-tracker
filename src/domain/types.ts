@@ -24,6 +24,21 @@ export interface ProfileSettings {
   heightCm: number | null;
   unit: Unit;
 }
+export interface BodyWeightEntry {
+  id: string;
+  date: string;
+  weightKg: number;
+  updatedAt: string;
+}
+export type WorkoutRecurrence =
+  | { kind: "weekly" }
+  | { kind: "biweekly"; anchorMonday: string }
+  | {
+      kind: "legacy";
+      anchorMonday: string;
+      weekdaysA: number[];
+      weekdaysB: number[];
+    };
 export interface ExerciseDefinition {
   id: string;
   name: string;
@@ -43,12 +58,13 @@ export interface WorkoutTemplate {
   title: string;
   exercises: WorkoutExercise[];
   weekdays: number[];
+  recurrence: WorkoutRecurrence;
   archived: boolean;
   updatedAt: string;
 }
 export interface ScheduleSlot {
   weekday: number;
-  workoutIds: string[];
+  workoutIds: (string | null)[];
 }
 export interface ScheduleRevision {
   id: string;
@@ -58,10 +74,12 @@ export interface ScheduleRevision {
   templates: WorkoutTemplate[];
 }
 export interface WeightSuggestion {
+  algorithmVersion: 1 | 2;
   weights: (number | null)[];
   reason: string;
 }
 export interface RecordedSet {
+  classification: "working" | "warmup";
   weight: string;
   reps: string;
   status: "pending" | "completed" | "skipped";
@@ -85,8 +103,9 @@ export interface WorkoutSession {
   exercises: SessionExercise[];
 }
 export interface AppData {
-  schemaVersion: 1;
+  schemaVersion: 2;
   settings: ProfileSettings;
+  bodyWeights: BodyWeightEntry[];
   exercises: ExerciseDefinition[];
   templates: WorkoutTemplate[];
   scheduleRevisions: ScheduleRevision[];

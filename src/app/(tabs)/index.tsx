@@ -5,12 +5,11 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useApp } from "../../data/store";
 import {
   addDays,
-  dayDifference,
   formatDate,
   mondayOf,
   today,
 } from "../../domain/dates";
-import { revisionForDate, scheduleForDate } from "../../domain/schedule";
+import { scheduleForDate } from "../../domain/schedule";
 import { startSession } from "../../domain/sessions";
 import { WEEKDAYS, WorkoutTemplate } from "../../domain/types";
 import {
@@ -39,15 +38,8 @@ export default function Home() {
   const start = mondayOf(selected);
   const session = data.sessions.find((s) => s.date === selected);
   const template = scheduleForDate(data, selected);
-  const rev = revisionForDate(data, selected);
   const isFuture = selected > now;
   const active = data.templates.filter((w) => !w.archived);
-  const alternating = rev?.slots.some((s) => s.workoutIds.length === 2);
-  const week =
-    rev &&
-    Math.abs(Math.floor(dayDifference(start, rev.anchorMonday) / 7) % 2) === 1
-      ? "B"
-      : "A";
   async function record(chosen?: WorkoutTemplate) {
     if (busyRef.current || isFuture) return;
     busyRef.current = true;
@@ -83,8 +75,8 @@ export default function Home() {
           headerRight: () => (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Create workout plan"
-              onPress={() => router.push("/editor")}
+              accessibilityLabel="Create or edit workout plans"
+              onPress={() => router.push("/plans")}
               style={{ padding: 12, marginRight: 6 }}
             >
               <Ionicons name="add-circle" size={30} color={t.accent} />
@@ -217,11 +209,6 @@ export default function Home() {
             );
           })}
         </Row>
-        {alternating && (
-          <Txt muted style={{ fontSize: 12, textAlign: "center" }}>
-            Week {week} · Fixed two-week rotation
-          </Txt>
-        )}
       </Card>
       <Card style={{ borderColor: t.accent, backgroundColor: t.accentSoft }}>
         <Txt
@@ -290,7 +277,7 @@ export default function Home() {
         ) : (
           <Button
             title="Create your first workout"
-            onPress={() => router.push("/editor")}
+            onPress={() => router.push("/plans")}
           />
         )}
       </Card>
@@ -311,46 +298,11 @@ export default function Home() {
         </Card>
       )}
       <SaveIndicator />
-      <Row style={{ justifyContent: "space-between" }}>
-        <SectionTitle>Your plans</SectionTitle>
-        <Txt muted>{active.length} workouts</Txt>
-      </Row>
-      {active.length === 0 ? (
-        <Card>
-          <Ionicons name="barbell-outline" color={t.accent} size={30} />
-          <Txt bold>A routine that fits your week</Txt>
-          <Txt muted>
-            Choose your exercises, set your rep ranges, and assign training
-            days. Your schedule repeats automatically.
-          </Txt>
-        </Card>
-      ) : (
-        active.map((w) => (
-          <Pressable
-            key={w.id}
-            accessibilityRole="button"
-            accessibilityLabel={"Edit " + w.title}
-            onPress={() =>
-              router.push({ pathname: "/editor", params: { id: w.id } })
-            }
-          >
-            <Card>
-              <Row style={{ justifyContent: "space-between" }}>
-                <View style={{ flex: 1, gap: 4 }}>
-                  <Txt bold>{w.title}</Txt>
-                  <Txt muted style={{ fontSize: 13 }}>
-                    {w.exercises.length} exercises ·{" "}
-                    {w.weekdays.length
-                      ? w.weekdays.map((i) => WEEKDAYS[i]).join(", ")
-                      : "Unscheduled"}
-                  </Txt>
-                </View>
-                <Ionicons name="chevron-forward" color={t.muted} size={20} />
-              </Row>
-            </Card>
-          </Pressable>
-        ))
-      )}
+      <Button
+        title="Manage plans"
+        secondary
+        onPress={() => router.push("/plans")}
+      />
     </Screen>
   );
 }

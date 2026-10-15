@@ -1,21 +1,45 @@
-import type { SyncResponse } from "./protocol";
-import type { SyncTransport } from "./transport";
+import { makeCommitBody, SyncError, type SyncTransport } from "./transport";
+
+function canonical(value: unknown): string {
+  const sort = (item: unknown): unknown => {
+    if (Array.isArray(item)) return item.map(sort);
+    if (item !== null && typeof item === "object") {
+      return Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, sort(child)]));
+    }
+    return item;
+  };
+  return JSON.stringify(sort(value));
+}
 
 export function createPreviewTransport(): SyncTransport {
-  const revisions = new Map<string, number>();
-  return async (request): Promise<SyncResponse> => {
-    let maximum = revisions.get(request.deviceId) ?? 0;
-    const acknowledged = (request.changes ?? []).map((change) => {
-      maximum = Math.max(maximum, change.revision);
-      return { key: change.key, revision: change.revision };
-    });
-    revisions.set(request.deviceId, maximum);
-    return {
-      version: 1,
-      ok: true,
-      deviceId: request.deviceId,
-      maxRevision: maximum,
-      acknowledged,
-    };
+  const bindings = new Map<string, string>();
+  const records = new Map<string, { revision: number; value: string }>();
+  return async (request, credentials, canSend = () => true) => {
+    makeCommitBody(request, credentials);
+    if (!canSend()) throw new SyncError("Cloud preview upload paused.", true);
+    const namespace = `${credentials.projectId}:${credentials.deviceId}:${credentials.generationId}`;
+    if (request.action === "bind") {
+      const installation = bindings.get(namespace);
+      if (installation !== undefined && installation !== request.installationId) {
+        throw new SyncError("This preview code is already bound to another installation.", false, "auth");
+      }
+      bindings.set(namespace, request.installationId);
+      return { acknowledged: [] };
+    }
+    if (bindings.get(namespace) !== request.installationId) {
+      throw new SyncError("Connect this preview installation before uploading.", false, "auth");
+    }
+    for (const change of request.changes) {
+      const previous = records.get(`${namespace}:${change.key}`);
+      if (previous && (previous.revision > change.revision ||
+        (previous.revision === change.revision && previous.value !== canonical(change)))) {
+        throw new SyncError("This preview revision is stale or changed. Replace the connection code.", false, "auth");
+      }
+    }
+    for (const change of request.changes) {
+      records.set(`${namespace}:${change.key}`, { revision: change.revision, value: canonical(change) });
+    }
+    return { acknowledged: request.changes.map(({ key, revision }) => ({ key, revision })) };
   };
 }

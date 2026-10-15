@@ -15,3 +15,5 @@ coverage/
 ios/
 android/
 .DS_Store
+.firebase/
+*-debug.log

@@ -1,10 +1,12 @@
 # Workout
 
-A personal iPhone workout journal built with React Native, TypeScript, Expo SDK 57, Expo Router, and SQLite. Recording and analytics work offline. The iOS deployment target is 16.4. Each installation has its own journal, with optional uploads to a private Google Sheet for reporting. App users need no Google login; the spreadsheet owner authorizes the server once.
+A personal iPhone workout journal built with React Native, TypeScript, Expo SDK 57, Expo Router, and SQLite. Recording and analytics work offline. The iOS deployment target is 16.4. Each installation has its own journal, with optional uploads to the owner's private Cloud Firestore database for reporting. App users paste a private connection code and have no Google sign-in screen.
 
 ## Start here
 
-For the standalone app that works with the PC switched off, follow [Install on your iPhone](docs/INSTALL_IPHONE.md). The provided `preview` EAS profile bundles the app for private installation on registered devices. This version adds native secure storage and requires a new EAS binary. For optional cloud uploads, follow [Private Google Sheets sync](docs/GOOGLE_SHEETS.md).
+For the standalone app that works with the PC switched off, follow [Install on your iPhone](docs/INSTALL_IPHONE.md). The `preview` EAS profile bundles the app for private installation on registered devices. This version requires a new native binary with `expo-crypto` and `expo-secure-store`. For optional cloud uploads, follow [Private Firestore uploads](docs/FIREBASE.md).
+
+The Firebase project is on Spark without billing, with its default Firestore database in `us-central1`. Device authentication, restrictive rules and indexes, and two private phone codes are ready. Synthetic live tests verified uploads, denied reads, credential revocation, rotation, and replacement. Installed iPhone acceptance remains pending. Firestore is a reporting copy; JSON backups remain the recovery method.
 
 For local development in PowerShell:
 
@@ -18,21 +20,25 @@ Use Node.js 22.18 or a newer supported LTS release compatible with the pinned SD
 
 ## Using the app
 
-- **Home:** Select a day in the week, move between weeks, and record or resume that day's workout. The plus button opens the workout editor. On a rest day, choose a saved workout manually. Future dates are view-only.
-- **Plans:** Pick library exercises or create your own, set sets and rep ranges, reorder exercises, and assign weekdays. One plan per weekday repeats weekly. Two plans on a weekday alternate A/B weeks; the schedule preview shows the order. The rotation follows calendar weeks, so missing a workout never shifts the next one. Edits apply today onward and leave historical schedules intact.
-- **Recording:** Enter actual weight and reps, then mark sets completed or skipped. Suggestions are separate until accepted. Edits save automatically; wait for **Saved** before force-closing. **Finish Workout** requires every set to be completed or explicitly skipped. Historical logs retain their exercise and target snapshots when templates change.
-- **Analytics:** See completed sets by primary muscle group, workout completion, and exercise history over 4, 8, or 12 weeks. Only finished sessions contribute. Each exercise counts toward one primary muscle group. Scheduled completion excludes future days.
-- **Settings:** Set optional profile information, pounds/kilograms and height, and exercise increments. Age, gender, and height do not change weight suggestions. Export/restore JSON backups here. Connect Google Sheets with a private phone code and consent to upload the profile and full history; pending rows and last upload are shown separately from local Saved status.
+- **Home:** Select a day, move between weeks, and record or resume that day's workout. The plus button opens **Workout Plans**, the shared place to create and edit plans. On a rest day, choose a saved workout manually. Future dates are view-only.
+- **Plans:** Pick library exercises or create your own, set sets and rep ranges, reorder exercises, and assign weekdays. Each plan explicitly chooses **Weekly** or **Every 2 weeks**, with the active week shown as dates. Plans can share a weekday only on opposite fortnightly weeks. A lone fortnightly plan retains its rest week. The rotation follows calendar weeks, so missing a workout never shifts the next one. Edits apply today onward and preserve historical schedules.
+- **Recording:** Enter actual weight and reps, then mark sets completed or skipped. Optional Warm-up/Working labels exclude warm-ups from progression and working-set analytics. Suggestions remain separate until accepted. Edits save automatically; wait for **Saved** before force-closing. **Finish Workout** requires every set to be completed or explicitly skipped. Historical logs retain exercise and target snapshots when plans change.
+- **Analytics:** Review working sets by primary muscle group, workout completion, volume, body-weight history, exercise progress and personal records over 4, 8, or 12 weeks. Estimated strength and body-weight ratios are approximate and show the measurement date. A next-workout card explains the suggested working weight. Only finished sessions contribute. Each exercise counts toward one primary muscle group. Scheduled completion excludes future days.
+- **Settings:** Set optional profile information, dated body-weight measurements, pounds/kilograms and height, and exercise increments. Age, gender, and height do not change weight suggestions. Export/restore JSON backups here. **Database uploads** accepts a private code, phone label, and explicit consent to upload the profile and full history. Pending records, initial-history completion, and last upload are separate from local **Saved** status.
 
-Weight suggestions repeat the latest comparable performance. After two consecutive qualifying sessions hit the upper rep target, the app can add one equipment increment. It suppresses increases larger than 10%, after a training gap of more than 28 days, and when set weights differ. Bodyweight exercises track reps only. Suggestions are transparent progression heuristics, not a validated prediction of strength or readiness. Sessions after a selected historical date never inform that day's suggestions.
+Weight suggestions use one working weight across an exercise. With mixed previous weights, completed weights/reps are adjusted toward the upper rep target and rounded down to the equipment increment. For an 8–12 target and 5 lb increments, 40 lb × 12 followed by 80 lb × 10 suggests 75 lb across working sets. An established common load stays steady while building reps. Two complete matching workouts at the upper target allow one increment more; two matching workouts missing the minimum allow one less. Skips, unfinished sets, large increments, and training gaps block progression as explained on screen. No effort rating is required. Bodyweight exercises track reps only. Suggestions are transparent heuristics; historical and in-progress sessions retain their original snapshots. Only sessions before the selected workout date inform its suggestion.
 
-## Data and backups
+## Data, cloud uploads, and recovery
 
-The app stores one journal per installation in local SQLite. While Sheets is disconnected, new profile and workout changes remain local unless you export a backup. Connecting Sheets uploads profile fields, exercises, plans, schedule revisions, workouts, and sets to the owner's private spreadsheet. Each phone has a separate device ID and token; the owner can identify it by its editable phone label. Tokens live in native secure storage; only their hashes are configured on the server. A second person's phone retains an independent local journal.
+SQLite holds the journal on each phone. Optional Firestore uploads include profile fields, dated body-weight measurements, exercises, plans, schedule revisions and template snapshots, workouts, and recorded sets. The owner can inspect them in Firebase Console. Each of the two authorized phones uses its own device identity and private code. An installation is bound to an upload generation; replacing a phone requires an owner-issued replacement code for a fresh generation. Credentials remain in native secure storage and are excluded from journal backups and the app bundle.
 
-The optional cloud copy supports reporting; the app does not download or restore records from Sheets. Keep JSON backups for recovery. Pending uploads persist locally, coalesce repeated edits to the same row, and retry while the app is open. Disconnecting stops uploads and leaves existing spreadsheet data intact; revoke a token on the server to disable it. See the [setup and rotation guide](docs/GOOGLE_SHEETS.md).
+The app is upload-only. The supplied Firestore rules deny client record reads and lists; the app does not download, merge, or restore cloud history. Uploads retry while the app is open. Pending changes and an immutable retry batch survive restart, and repeated edits coalesce into the latest pending document. Deletions upload an empty-payload tombstone with a revision. Disconnecting stops that installation's uploads; existing cloud data remains. Owner revocation disables access at the server. See [setup, rotation, and replacement](docs/FIREBASE.md).
 
-Use **Settings > Export backup** regularly and before uninstalling, replacing the phone, or updating the app. Restore replaces the entire journal after validation and confirmation; it does not merge two journals. Invalid or unsupported backup files leave existing data intact. Version 1 backups have a 10 MiB limit. Store the backup outside the app's own storage so uninstalling cannot remove your only copy.
+The local upload budget counts attempts and pauses uploads at its daily limit, with the next attempt shown in Settings. Recording, analytics, and JSON backups remain local. A paused or failed cloud upload does not mean a local save failed.
+
+Use **Settings > Export backup** regularly and before uninstalling, replacing the phone, or updating the app. Restore replaces the entire local journal after validation and confirmation; it does not merge journals or import upload credentials. Invalid or unsupported files leave current data intact. New exports use JSON version 2; version 1 imports remain supported. Both have a 10 MiB limit. Keep exported copies outside the app's storage.
+
+The SQLite schema is version **5**. Before migrating an existing native journal, the app preserves a validated recovery copy in its original schema in private app storage, named for the source and destination database versions. When available, **Settings > Backup & restore > Export pre-migration backup** shares that earlier copy to Files. Export it outside the app: uninstalling also removes this private recovery copy. Compatible old schedules convert automatically; irregular ones keep an **Existing custom schedule** until you explicitly choose a new recurrence.
 
 ## Development and verification
 
@@ -40,6 +46,7 @@ Use **Settings > Export backup** regularly and before uninstalling, replacing th
 npm run typecheck
 npm run lint
 npm test
+npm run test:rules
 npx expo install --check
 npx expo-doctor
 npx expo export --platform ios
@@ -48,16 +55,13 @@ npm run measure
 
 The implementation is split into small modules:
 
-- `src/domain`: pure dates, scheduling, recommendations, analytics, and backup validation.
-- `src/data`: SQLite journal state, atomic changed-record writes, migration, and serialized autosaves.
-- `src/sync`: normalized row projection, persistent upload queue and revisions, secure credentials, and upload control.
-- `server`: deployable Apps Script authentication plus atomic Sheets row and revision writes.
-- `src/app`: Expo Router screens, with non-route components kept outside it.
+- `src/domain`: dates, scheduling, recommendations, analytics, and backup validation.
+- `src/data`: SQLite journal records, migrations, atomic changes, and serialized autosaves.
+- `src/sync`: Firestore document projection, durable outbox and frozen batches, private credentials, authentication, and upload control.
+- `firebase`: upload-only rules, index configuration, and rules tests.
+- `scripts/firebaseSetup.ts`: the local owner utility for private enrollment and credential management.
+- `src/app`: Expo Router screens, with non-route components outside it.
 
-SQLite stores journal details and individual workout sessions separately. Saves commit only changed records in one atomic transaction. Existing journals migrate automatically, and rapid edits share pending saves without delaying the first write. Save errors remain visible and the latest state can be retried.
+Local journal changes and their upload changes commit in the same SQLite transaction. Automated coverage includes historical snapshots, backup validation, save rollback, staged enrollment, exact retry payloads, stale acknowledgments, encoded batch bounds, and quota pauses. Browser uploads use a local demo and do not contact Firebase.
 
-Automated tests cover domain rules, backup graph validation, autosave ordering/recovery, row projection, transactional sync queues, connection races, acknowledgment handling, server authentication, atomic retries, and private setup-code generation. Browser sync is a local demo and does not contact Google. A JavaScript bundle or web preview is not verification of an iOS native build. Complete [the device checklist](docs/DEVICE_CHECKLIST.md) on an installed preview build before relying on it at the gym. Apple signing, an EAS cloud build, and physical-device validation require the owner's accounts and iPhone.
-
-See the [verification report](docs/VERIFICATION.md) for completed checks, pending iPhone validation, and dependency audit findings.
-
-See [size and efficiency measurements](docs/PERFORMANCE.md) for reproducible bundle and storage results.
+A browser preview or JavaScript export does not verify an iOS native build. Complete [the device checklist](docs/DEVICE_CHECKLIST.md) on an installed preview build before relying on it at the gym. Apple signing, EAS cloud builds, physical-device tests, and each phone's first Firebase enrollment remain separate owner steps. See [verification status](docs/VERIFICATION.md) and [historical performance measurements](docs/PERFORMANCE.md).

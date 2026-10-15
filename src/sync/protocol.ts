@@ -1,172 +1,97 @@
-export type SheetTable =
-  | "People"
-  | "Exercises"
-  | "Plans"
-  | "Schedules"
-  | "Workouts"
-  | "Sets";
-export type SheetValue = string | number | boolean | null;
-export interface SheetRow {
-  table: SheetTable;
+export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
+export interface JsonObject { [key: string]: JsonValue; }
+export const UPLOAD_KINDS = [
+  "profile", "body_weight", "exercise", "plan", "schedule", "schedule_template", "workout",
+  "workout_exercise", "completion",
+] as const;
+export type UploadKind = (typeof UPLOAD_KINDS)[number];
+export interface UploadDocument {
   key: string;
-  values: SheetValue[];
+  kind: UploadKind;
+  payload: JsonObject;
 }
-export interface RowChange extends SheetRow {
+export interface DocumentChange extends UploadDocument {
   revision: number;
   deleted: boolean;
 }
-export interface SyncCredentials {
-  version: 1;
-  endpoint: string;
+export type RowChange = DocumentChange;
+export interface SyncIdentity {
+  projectId: string;
   deviceId: string;
-  token: string;
+  generationId: string;
 }
-export interface SyncRequest {
+export interface SyncCredentials extends SyncIdentity {
   version: 1;
-  action: "hello" | "upload";
-  deviceId: string;
-  token: string;
-  changes?: RowChange[];
+  apiKey: string;
+  uid: string;
+  email: string;
+  password: string;
 }
-export type SyncResponse =
-  | {
-      version: 1;
-      ok: true;
-      deviceId: string;
-      maxRevision: number;
-      acknowledged: { key: string; revision: number }[];
-    }
-  | { version: 1; ok: false; error: string; retryable: boolean };
+export interface UploadBatch {
+  id: string;
+  changes: DocumentChange[];
+}
+export interface CommitReceipt {
+  acknowledged: { key: string; revision: number }[];
+}
+export type FirestoreValue =
+  | { nullValue: null }
+  | { booleanValue: boolean }
+  | { integerValue: string }
+  | { doubleValue: number }
+  | { stringValue: string }
+  | { arrayValue: { values: FirestoreValue[] } }
+  | { mapValue: { fields: Record<string, FirestoreValue> } };
+export interface FirestoreDocument {
+  name: string;
+  fields: Record<string, FirestoreValue>;
+}
 
-export const HEADERS: Record<SheetTable, readonly string[]> = {
-  People: ["Phone label", "Age", "Gender", "Height cm", "Preferred unit"],
-  Exercises: [
-    "Exercise ID",
-    "Exercise index",
-    "Name",
-    "Muscle group",
-    "Equipment",
-    "Increment lb",
-    "Increment kg",
-  ],
-  Plans: [
-    "Row type",
-    "Template ID",
-    "Template index",
-    "Title",
-    "Archived",
-    "Updated at",
-    "Exercise index",
-    "Exercise ID",
-    "Sets",
-    "Rep min",
-    "Rep max",
-    "Weekday index",
-    "Weekday",
-  ],
-  Schedules: [
-    "Row type",
-    "Revision ID",
-    "Revision index",
-    "Effective date",
-    "Anchor Monday",
-    "Slot index",
-    "Weekday",
-    "Workout index",
-    "Workout ID",
-    "Template index",
-    "Template ID",
-    "Title",
-    "Archived",
-    "Updated at",
-    "Exercise index",
-    "Exercise ID",
-    "Sets",
-    "Rep min",
-    "Rep max",
-    "Template weekday index",
-    "Template weekday",
-  ],
-  Workouts: [
-    "Session ID",
-    "Date",
-    "Title",
-    "Template ID",
-    "Unit",
-    "Status",
-    "Started at",
-    "Updated at",
-    "Finished at",
-    "Exercise count",
-  ],
-  Sets: [
-    "Row type",
-    "Session ID",
-    "Exercise index",
-    "Exercise ID",
-    "Exercise name",
-    "Muscle group",
-    "Equipment",
-    "Increment lb",
-    "Increment kg",
-    "Target exercise ID",
-    "Target sets",
-    "Target rep min",
-    "Target rep max",
-    "Suggestion reason",
-    "Recorded set count",
-    "Suggestion count",
-    "Set index",
-    "Suggested weight",
-    "Suggestion present",
-    "Actual present",
-    "Actual weight",
-    "Actual reps",
-    "Set status",
-  ],
-};
-
-export const MAX_BATCH_ROWS = 100;
+export const MAX_BATCH_DOCUMENTS = 10;
+export const MAX_BATCH_ROWS = MAX_BATCH_DOCUMENTS;
 export const MAX_BATCH_BYTES = 256 * 1024;
-export const MAX_ROW_BYTES = 16 * 1024;
+export const BATCH_METADATA_RESERVE_BYTES = 8 * 1024;
 export const MAX_CONNECTION_CODE_BYTES = 4096;
-const ENDPOINT = /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/;
+export const MAX_DOCUMENT_KEY_BYTES = 1500;
+const PROJECT_ID = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const TOKEN = /^[0-9a-f]{64}$/;
-const TABLES = Object.keys(HEADERS) as SheetTable[];
+const API_KEY = /^[A-Za-z0-9_-]{20,128}$/;
+const UID = /^[A-Za-z0-9_-]{1,128}$/;
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 function record(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
   const actual = Object.keys(value);
   return actual.length === keys.length && keys.every((key) => actual.includes(key));
 }
-export function validateEndpoint(value: unknown): string {
-  if (typeof value !== "string" || !ENDPOINT.test(value))
-    throw new Error("Invalid Sheets endpoint");
-  return value;
+export function validateIdentity(value: unknown): SyncIdentity {
+  if (
+    !record(value) || typeof value.projectId !== "string" || !PROJECT_ID.test(value.projectId) ||
+    typeof value.deviceId !== "string" || !UUID.test(value.deviceId) ||
+    typeof value.generationId !== "string" || !UUID.test(value.generationId)
+  ) throw new Error("Invalid Firestore identity");
+  return { projectId: value.projectId, deviceId: value.deviceId, generationId: value.generationId };
 }
 export function validateCredentials(value: unknown): SyncCredentials {
   if (
     !record(value) ||
-    !exactKeys(value, ["version", "endpoint", "deviceId", "token"]) ||
-    value.version !== 1 ||
-    typeof value.deviceId !== "string" ||
-    !UUID.test(value.deviceId) ||
-    typeof value.token !== "string" ||
-    !TOKEN.test(value.token)
-  )
-    throw new Error("Invalid Sheets connection");
-  validateEndpoint(value.endpoint);
+    !exactKeys(value, ["version", "projectId", "apiKey", "deviceId", "generationId", "uid", "email", "password"]) ||
+    value.version !== 1 || typeof value.apiKey !== "string" || !API_KEY.test(value.apiKey) ||
+    typeof value.uid !== "string" || !UID.test(value.uid) ||
+    typeof value.email !== "string" || value.email.length > 254 || !EMAIL.test(value.email) ||
+    typeof value.password !== "string" || value.password.length < 6 || value.password.length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(value.password)
+  ) throw new Error("Invalid Firestore connection");
+  const identity = validateIdentity(value);
   return {
-    version: 1,
-    endpoint: value.endpoint as string,
-    deviceId: value.deviceId,
-    token: value.token,
+    version: 1, ...identity, apiKey: value.apiKey, uid: value.uid,
+    email: value.email, password: value.password,
   };
 }
-
 export function byteLength(text: string): number {
   let bytes = 0;
   for (let index = 0; index < text.length; index++) {
@@ -174,21 +99,15 @@ export function byteLength(text: string): number {
     if (point < 0x80) bytes++;
     else if (point < 0x800) bytes += 2;
     else if (
-      point >= 0xd800 &&
-      point <= 0xdbff &&
-      index + 1 < text.length &&
-      text.charCodeAt(index + 1) >= 0xdc00 &&
-      text.charCodeAt(index + 1) <= 0xdfff
-    ) {
-      bytes += 4;
-      index++;
-    } else bytes += 3;
+      point >= 0xd800 && point <= 0xdbff && index + 1 < text.length &&
+      text.charCodeAt(index + 1) >= 0xdc00 && text.charCodeAt(index + 1) <= 0xdfff
+    ) { bytes += 4; index++; }
+    else bytes += 3;
   }
   return bytes;
 }
 function decodeBase64Url(text: string): string {
-  if (!/^[A-Za-z0-9_-]+$/.test(text) || text.length % 4 === 1)
-    throw new Error("Invalid encoding");
+  if (!/^[A-Za-z0-9_-]+$/.test(text) || text.length % 4 === 1) throw new Error("Invalid encoding");
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
   let buffer = 0;
   let bits = 0;
@@ -208,144 +127,169 @@ function decodeBase64Url(text: string): string {
 }
 export function parseConnectionCode(value: unknown): SyncCredentials {
   try {
-    if (
-      typeof value !== "string" ||
-      byteLength(value) > MAX_CONNECTION_CODE_BYTES
-    )
+    if (typeof value !== "string" || byteLength(value) > MAX_CONNECTION_CODE_BYTES)
       throw new Error("Invalid code");
     const code = value.trim();
-    if (!code.startsWith("WORKOUT1.")) throw new Error("Invalid code");
-    return validateCredentials(JSON.parse(decodeBase64Url(code.slice(9))));
-  } catch {
-    throw new Error("Invalid Sheets connection code");
-  }
+    if (!code.startsWith("WORKOUTFB1.")) throw new Error("Invalid code");
+    return validateCredentials(JSON.parse(decodeBase64Url(code.slice(11))));
+  } catch { throw new Error("Invalid Firestore connection code"); }
 }
-
-export function makeRowKey(
-  table: SheetTable,
-  deviceId: string,
-  ...source: (string | number)[]
-): string {
-  return [table, deviceId, ...source].map((part) => encodeURIComponent(part)).join(":");
+export function makeDocumentKey(kind: UploadKind, deviceId: string, ...source: (string | number)[]): string {
+  try {
+    if (!UPLOAD_KINDS.includes(kind) || !UUID.test(deviceId)) throw new Error("Invalid key");
+    if (kind === "completion") {
+      if (source.length) throw new Error("Invalid key");
+      return "completion";
+    }
+    if (!source.length || source.some((part) => String(part).length === 0 || (typeof part === "number" && (!Number.isSafeInteger(part) || part < 0)))) throw new Error("Invalid key");
+    const key = [kind, deviceId, ...source].map((part) => encodeURIComponent(part)).join(":");
+    if (byteLength(key) > MAX_DOCUMENT_KEY_BYTES) throw new Error("Invalid key");
+    return key;
+  } catch { throw new Error("Invalid upload document key"); }
 }
-function deviceKey(value: unknown, deviceId: string, table?: SheetTable): value is string {
-  if (typeof value !== "string") return false;
+function validDocumentKey(value: unknown, deviceId?: string, kind?: UploadKind): value is string {
+  if (typeof value !== "string" || byteLength(value) > MAX_DOCUMENT_KEY_BYTES) return false;
+  if (value === "completion") return kind === undefined || kind === "completion";
   const parts = value.split(":");
   if (
-    parts.length < 3 ||
-    !TABLES.includes(parts[0] as SheetTable) ||
-    (table !== undefined && parts[0] !== table) ||
-    parts[1] !== encodeURIComponent(deviceId)
-  )
-    return false;
+    parts.length < 3 || !UPLOAD_KINDS.includes(parts[0] as UploadKind) || parts[0] === "completion" ||
+    (kind !== undefined && parts[0] !== kind) || !UUID.test(parts[1]) ||
+    (deviceId !== undefined && parts[1] !== deviceId)
+  ) return false;
   try {
-    return parts.every(
-      (part) => part.length > 0 && encodeURIComponent(decodeURIComponent(part)) === part,
-    );
-  } catch {
-    return false;
+    return parts.every((part) => part.length > 0 && encodeURIComponent(decodeURIComponent(part)) === part);
+  } catch { return false; }
+}
+function encodeValue(value: unknown, seen: Set<object>, depth: number, insideArray = false): FirestoreValue {
+  if (depth > 19) throw new Error("Invalid upload payload");
+  if (value === null) return { nullValue: null };
+  if (typeof value === "string") {
+    if (byteLength(value) > 1024 * 1024 - 89) throw new Error("Invalid upload payload");
+    return { stringValue: value };
   }
+  if (typeof value === "boolean") return { booleanValue: value };
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER) throw new Error("Invalid upload payload");
+    return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+  }
+  if (typeof value !== "object" || seen.has(value)) throw new Error("Invalid upload payload");
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (insideArray) throw new Error("Invalid upload payload");
+      const values: FirestoreValue[] = [];
+      for (let index = 0; index < value.length; index++) {
+        if (!Object.prototype.hasOwnProperty.call(value, index)) throw new Error("Invalid upload payload");
+        values.push(encodeValue(value[index], seen, depth + 1, true));
+      }
+      return { arrayValue: { values } };
+    }
+    if (!record(value)) throw new Error("Invalid upload payload");
+    const fields: Record<string, FirestoreValue> = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (!key || byteLength(key) > 1500 || /^__.*__$/.test(key)) throw new Error("Invalid upload payload");
+      fields[key] = encodeValue(child, seen, depth + 1);
+    }
+    return { mapValue: { fields } };
+  } finally { seen.delete(value); }
 }
-function revision(value: unknown, zero = false): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= (zero ? 0 : 1);
+export function encodeFirestoreValue(value: unknown): FirestoreValue {
+  return encodeValue(value, new Set(), 0);
 }
-function validChange(change: RowChange, deviceId: string): boolean {
-  return (
-    record(change) &&
-    TABLES.includes(change.table) &&
-    deviceKey(change.key, deviceId, change.table) &&
-    revision(change.revision) &&
-    typeof change.deleted === "boolean" &&
-    Array.isArray(change.values) &&
-    change.values.length === HEADERS[change.table].length &&
-    change.values.every(
-      (value) =>
-        value === null ||
-        typeof value === "string" ||
-        typeof value === "boolean" ||
-        (typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER),
-    )
-  );
+export function validateDocument(value: unknown, deviceId?: string): UploadDocument {
+  if (
+    !record(value) || !exactKeys(value, ["key", "kind", "payload"]) ||
+    !UPLOAD_KINDS.includes(value.kind as UploadKind) ||
+    !validDocumentKey(value.key, deviceId, value.kind as UploadKind) || !record(value.payload) ||
+    (value.kind === "completion" && (!exactKeys(value.payload, ["initialUploadComplete"]) || value.payload.initialUploadComplete !== true))
+  ) throw new Error("Invalid upload document");
+  encodeFirestoreValue(value.payload);
+  return { key: value.key, kind: value.kind as UploadKind, payload: value.payload as JsonObject };
+}
+export function validateDocumentChange(value: unknown, deviceId?: string): DocumentChange {
+  if (
+    !record(value) || !exactKeys(value, ["key", "kind", "payload", "revision", "deleted"]) ||
+    typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 1 ||
+    typeof value.deleted !== "boolean" || (value.kind === "completion" && value.deleted !== false) ||
+    (value.deleted === true && (!record(value.payload) || Object.keys(value.payload).length !== 0))
+  ) throw new Error("Invalid upload document");
+  return {
+    ...validateDocument({ key: value.key, kind: value.kind, payload: value.payload }, deviceId),
+    revision: value.revision, deleted: value.deleted,
+  };
+}
+export function recordDocumentName(identity: SyncIdentity, key: string): string {
+  const checked = validateIdentity(identity);
+  if (!validDocumentKey(key, checked.deviceId)) throw new Error("Invalid upload document key");
+  return `projects/${checked.projectId}/databases/(default)/documents/devices/${checked.deviceId}/generations/${checked.generationId}/records/${key}`;
+}
+export function encodeFirestoreDocument(
+  identity: SyncIdentity,
+  installationId: string,
+  change: DocumentChange,
+): FirestoreDocument {
+  const checked = validateIdentity(identity);
+  if (!UUID.test(installationId)) throw new Error("Invalid installation identity");
+  const document = validateDocumentChange(change, checked.deviceId);
+  const envelope = encodeFirestoreValue({
+    schemaVersion: 1, deviceId: checked.deviceId, generationId: checked.generationId,
+    installationId, key: document.key, kind: document.kind, revision: document.revision,
+    deleted: document.deleted, payload: document.payload,
+  });
+  if (!("mapValue" in envelope)) throw new Error("Invalid upload document");
+  return { name: recordDocumentName(checked, document.key), fields: envelope.mapValue.fields };
+}
+export function encodedBatchBytes(identity: SyncIdentity, installationId: string, changes: DocumentChange[]): number {
+  return byteLength(JSON.stringify({
+    writes: changes.map((change) => ({ update: encodeFirestoreDocument(identity, installationId, change) })),
+  }));
 }
 export function makeBatch(
-  credentials: SyncCredentials,
-  changes: RowChange[],
-): SyncRequest {
-  const checked = validateCredentials(credentials);
-  const request: SyncRequest = {
-    version: 1,
-    action: "upload",
-    deviceId: checked.deviceId,
-    token: checked.token,
-    changes: [],
-  };
-  let bytes = byteLength(JSON.stringify(request));
+  identity: SyncIdentity,
+  changes: DocumentChange[],
+  installationId: string,
+): { changes: DocumentChange[] } {
+  const checked = validateIdentity(identity);
+  if (!UUID.test(installationId)) throw new Error("Invalid installation identity");
+  const result: DocumentChange[] = [];
+  const keys = new Set<string>();
+  let bytes = byteLength(JSON.stringify({ writes: [] }));
   let full = false;
+  const limit = MAX_BATCH_BYTES - BATCH_METADATA_RESERVE_BYTES;
   for (const change of changes) {
-    if (!validChange(change, checked.deviceId)) throw new Error("Invalid sync row");
-    const size = byteLength(JSON.stringify(change));
-    if (size >= MAX_ROW_BYTES) throw new Error("A sync row exceeds the supported size");
-    const separator = request.changes!.length > 0 ? 1 : 0;
-    if (
-      full ||
-      request.changes!.length >= MAX_BATCH_ROWS ||
-      bytes + size + separator > MAX_BATCH_BYTES
-    ) {
+    const encoded = { update: encodeFirestoreDocument(checked, installationId, change) };
+    if (keys.has(change.key)) throw new Error("Duplicate upload document");
+    keys.add(change.key);
+    const size = byteLength(JSON.stringify(encoded));
+    if (size + 13 > limit) throw new Error("A document exceeds the upload size limit");
+    const separator = result.length ? 1 : 0;
+    if (full || result.length >= MAX_BATCH_DOCUMENTS || bytes + size + separator > limit) {
       full = true;
       continue;
     }
-    request.changes!.push(change);
+    result.push(JSON.parse(JSON.stringify(change)) as DocumentChange);
     bytes += size + separator;
   }
-  return request;
+  return { changes: result };
 }
-
-export function parseSyncResponse(value: unknown, deviceId: string): SyncResponse {
-  const invalid = () => new Error("Invalid Sheets response");
-  if (!UUID.test(deviceId) || !record(value) || value.version !== 1)
-    throw invalid();
-  if (value.ok === false) {
-    if (
-      !exactKeys(value, ["version", "ok", "error", "retryable"]) ||
-      typeof value.error !== "string" ||
-      !value.error.trim() ||
-      value.error.length > 300 ||
-      typeof value.retryable !== "boolean"
-    )
-      throw invalid();
-    return { version: 1, ok: false, error: value.error, retryable: value.retryable };
-  }
+export function parseCommitReceipt(value: unknown, expected?: DocumentChange[]): CommitReceipt {
   if (
-    value.ok !== true ||
-    !exactKeys(value, ["version", "ok", "deviceId", "maxRevision", "acknowledged"]) ||
-    value.deviceId !== deviceId ||
-    !revision(value.maxRevision, true) ||
-    !Array.isArray(value.acknowledged) ||
-    value.acknowledged.length > MAX_BATCH_ROWS
-  )
-    throw invalid();
+    !record(value) || !exactKeys(value, ["acknowledged"]) || !Array.isArray(value.acknowledged) ||
+    value.acknowledged.length > MAX_BATCH_DOCUMENTS ||
+    (expected !== undefined && value.acknowledged.length !== expected.length)
+  ) throw new Error("Invalid upload receipt");
   const acknowledged: { key: string; revision: number }[] = [];
   const keys = new Set<string>();
-  for (const item of value.acknowledged) {
+  for (const [index, item] of value.acknowledged.entries()) {
     if (
-      !record(item) ||
-      !exactKeys(item, ["key", "revision"]) ||
-      !deviceKey(item.key, deviceId) ||
-      item.key.length >= MAX_ROW_BYTES ||
-      !revision(item.revision) ||
-      item.revision > value.maxRevision ||
-      keys.has(item.key)
-    )
-      throw invalid();
+      !record(item) || !exactKeys(item, ["key", "revision"]) || !validDocumentKey(item.key) ||
+      typeof item.revision !== "number" || !Number.isSafeInteger(item.revision) || item.revision < 1 ||
+      keys.has(item.key) ||
+      (expected !== undefined && (item.key !== expected[index].key || item.revision !== expected[index].revision))
+    ) throw new Error("Invalid upload receipt");
     keys.add(item.key);
     acknowledged.push({ key: item.key, revision: item.revision });
   }
-  return {
-    version: 1,
-    ok: true,
-    deviceId,
-    maxRevision: value.maxRevision,
-    acknowledged,
-  };
+  return { acknowledged };
 }
-
+export const validateCommitReceipt = parseCommitReceipt;

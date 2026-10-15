@@ -1,73 +1,74 @@
 import {
-  makeBatch,
-  MAX_BATCH_ROWS,
   parseConnectionCode,
   validateCredentials,
-  type RowChange,
   type SyncCredentials,
+  type SyncIdentity,
+  type UploadBatch,
 } from "./protocol";
-import { SyncError, validateResponse, type SyncTransport } from "./transport";
+import { makeCommitBody, SyncError, validateResponse, type SyncRequest, type SyncTransport } from "./transport";
 
-export interface SyncLocalState {
-  deviceId: string;
+export interface SyncLocalState extends SyncIdentity {
+  installationId: string;
   label: string;
   clock: number;
   lastSyncedAt: string | null;
   enabled: boolean;
+  bound: boolean;
+  initialComplete: boolean;
 }
-
 export interface SyncRepository {
   state(): Promise<SyncLocalState | null>;
-  connect(deviceId: string, label: string, serverMaxRevision: number): Promise<void>;
+  pendingEnrollment(): Promise<SyncLocalState | null>;
+  prepareEnrollment(identity: SyncIdentity, label: string, installationId: string): Promise<SyncLocalState>;
+  activateEnrollment(staged: SyncLocalState): Promise<void>;
   disconnect(): Promise<void>;
   setLabel(label: string): Promise<void>;
   pendingCount(): Promise<number>;
-  pending(): Promise<RowChange[]>;
-  acknowledge(acks: { key: string; revision: number }[], at: string): Promise<void>;
+  inFlight(): Promise<UploadBatch | null>;
+  reserveAttempt(writes: number, at: number): Promise<{ allowed: boolean; retryAt: number | null }>;
+  acknowledge(batchId: string, acks: { key: string; revision: number }[], at: string): Promise<void>;
 }
-
 export interface SyncSecrets {
   load(): Promise<SyncCredentials | null>;
   save(credentials: SyncCredentials): Promise<void>;
   remove(): Promise<void>;
 }
-
 export interface SyncViewState {
-  status: "disconnected" | "pending" | "syncing" | "synced" | "error";
+  status: "disconnected" | "pending" | "syncing" | "synced" | "paused" | "error";
   deviceLabel: string;
   pending: number;
   lastSyncedAt: string | null;
   error: string | null;
   busy: boolean;
+  bound: boolean;
+  initialComplete: boolean;
+  pausedUntil: string | null;
 }
-
 export interface SyncControllerOptions {
   now?: () => number;
   setTimeout?: (callback: () => void, delay: number) => unknown;
   clearTimeout?: (handle: unknown) => void;
+  createInstallationId?: () => string;
 }
-
 export const DISCONNECTED_SYNC_STATE: SyncViewState = {
-  status: "disconnected",
-  deviceLabel: "",
-  pending: 0,
-  lastSyncedAt: null,
-  error: null,
-  busy: false,
+  status: "disconnected", deviceLabel: "", pending: 0, lastSyncedAt: null,
+  error: null, busy: false, bound: false, initialComplete: false, pausedUntil: null,
 };
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function safeError(error: unknown): SyncError {
   return error instanceof SyncError
     ? error
-    : new SyncError("Sheets sync could not finish. Try again.", true);
+    : new SyncError("Cloud upload could not finish. Your changes remain saved on this phone.", true, "storage");
 }
-
 function checkedLabel(value: string): string {
   const label = value.trim();
-  if (!label || label.length > 80) {
-    throw new SyncError("Enter a phone label between 1 and 80 characters.", false);
-  }
+  if (!label || label.length > 80) throw new SyncError("Enter a phone label between 1 and 80 characters.", false, "invalid");
   return label;
+}
+function matches(state: SyncIdentity | null, credentials: SyncIdentity): boolean {
+  return state !== null && state.projectId === credentials.projectId &&
+    state.deviceId === credentials.deviceId && state.generationId === credentials.generationId;
 }
 
 export class SyncController {
@@ -81,7 +82,6 @@ export class SyncController {
   private controls = 0;
   private active = true;
   private disposed = false;
-  private blocked = false;
   private blockedError: string | null = null;
   private generation = 0;
   private configuration = 0;
@@ -90,11 +90,13 @@ export class SyncController {
   private timerAt: number | null = null;
   private firstChangeAt: number | null = null;
   private retryAt: number | null = null;
+  private quotaUntil: number | null = null;
   private retryDelay = 15_000;
   private runAgain = false;
   private readonly now: () => number;
   private readonly schedule: (callback: () => void, delay: number) => unknown;
   private readonly cancel: (handle: unknown) => void;
+  private readonly installationId: () => string;
 
   constructor(
     private readonly repository: SyncRepository,
@@ -103,15 +105,17 @@ export class SyncController {
     options: SyncControllerOptions = {},
   ) {
     this.now = options.now ?? Date.now;
-    this.schedule =
-      options.setTimeout ?? ((callback, delay) => setTimeout(callback, delay));
-    this.cancel =
-      options.clearTimeout ??
-      ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+    this.schedule = options.setTimeout ?? ((callback, delay) => setTimeout(callback, delay));
+    this.cancel = options.clearTimeout ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+    this.installationId = options.createInstallationId ?? (() => {
+      if (typeof globalThis.crypto?.randomUUID !== "function") {
+        throw new SyncError("This app could not create a secure installation identity. Try again.", false, "invalid");
+      }
+      return globalThis.crypto.randomUUID();
+    });
   }
 
   getSnapshot = (): SyncViewState => this.snapshot;
-
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -122,34 +126,33 @@ export class SyncController {
     this.initialization = this.enqueue(async () => {
       const configuration = this.configuration;
       try {
-        const [saved, state] = await Promise.all([
-          this.secrets.load(),
-          this.repository.state(),
+        const [saved, state, staged] = await Promise.all([
+          this.secrets.load(), this.repository.state(), this.repository.pendingEnrollment(),
         ]);
         if (!this.currentConfiguration(configuration)) return;
         const credentials = saved ? validateCredentials(saved) : null;
-        if (credentials && state?.enabled && state.deviceId === credentials.deviceId) {
+        if (
+          credentials &&
+          ((matches(state, credentials) && state!.enabled && state!.bound) || matches(staged, credentials))
+        ) {
           this.credentials = credentials;
           await this.refresh(this.generation, null);
           this.scheduleAt(this.now());
         } else {
           this.credentials = null;
           this.publish({
-            status: "disconnected",
-            deviceLabel: state?.label ?? "",
+            ...DISCONNECTED_SYNC_STATE,
+            deviceLabel: state?.label ?? staged?.label ?? "",
             lastSyncedAt: state?.lastSyncedAt ?? null,
-            pending: 0,
-            error: credentials
-              ? "Reconnect Sheets to this phone before syncing."
-              : null,
+            error: credentials ? "This installation needs an owner-issued replacement connection code." : null,
           });
         }
       } catch {
         if (this.currentConfiguration(configuration)) {
           this.credentials = null;
           this.publish({
-            status: "disconnected",
-            error: "The saved Sheets connection could not be loaded. Reconnect and try again.",
+            ...DISCONNECTED_SYNC_STATE,
+            error: "The saved cloud connection could not be loaded. Replace the connection code.",
           });
         }
       }
@@ -157,64 +160,62 @@ export class SyncController {
     return this.initialization;
   }
 
-  connect(code: string, label: string): Promise<void> {
-    if (this.connecting) {
-      return Promise.reject(new SyncError("A Sheets connection is already being checked.", false));
-    }
-    if (this.disposed) return Promise.reject(new SyncError("Sync has stopped.", false));
+  connect(code: string, value: string): Promise<void> {
+    if (this.connecting) return Promise.reject(new SyncError("A cloud connection is already being checked.", false, "invalid"));
+    if (this.disposed) return Promise.reject(new SyncError("Sync has stopped.", false, "invalid"));
     this.connecting = true;
     ++this.generation;
     const configuration = ++this.configuration;
     this.clearSchedule();
     return this.control(async () => {
+      const previous = this.credentials;
+      let saved = false;
       try {
-        if (!this.active) throw new SyncError("Open the app to connect Sheets.", true);
+        if (!this.active) throw new SyncError("Open the app to connect cloud uploads.", true);
         let credentials: SyncCredentials;
-        try {
-          credentials = parseConnectionCode(code);
-        } catch {
-          throw new SyncError("The Sheets connection code is invalid.", false);
+        try { credentials = parseConnectionCode(code); } catch {
+          throw new SyncError("The cloud connection code is invalid.", false, "invalid");
         }
-        const deviceLabel = checkedLabel(label);
-        const request = {
-          version: 1 as const,
-          action: "hello" as const,
-          deviceId: credentials.deviceId,
-          token: credentials.token,
-        };
-        const response = validateResponse(
-          request,
-          await this.transport(request, credentials),
-        );
-        if (!this.currentConfiguration(configuration)) throw new SyncError("The connection changed. Try again.", true);
-        if (!response.ok) throw new SyncError(response.error, response.retryable);
-        if (response.maxRevision === Number.MAX_SAFE_INTEGER) {
-          throw new SyncError("Sheets returned an invalid revision. Reconnect and try again.", false);
-        }
-        const previous = this.credentials;
+        const label = checkedLabel(value);
+        const installationId = this.installationId();
+        if (!UUID.test(installationId)) throw new SyncError("A secure installation identity could not be created.", false, "invalid");
+        const staged = await this.repository.prepareEnrollment({
+          projectId: credentials.projectId, deviceId: credentials.deviceId, generationId: credentials.generationId,
+        }, label, installationId);
+        if (!this.currentConfiguration(configuration)) return;
+        this.checkStaged(staged, credentials);
         await this.secrets.save(credentials);
-        try {
-          if (!this.currentConfiguration(configuration)) throw new Error();
-          await this.repository.connect(
-            credentials.deviceId,
-            deviceLabel,
-            response.maxRevision,
-          );
-        } catch {
-          if (previous) await this.secrets.save(previous);
-          else await this.secrets.remove();
-          throw new SyncError("The Sheets connection could not be saved. Try again.", true);
-        }
+        saved = true;
         if (!this.currentConfiguration(configuration)) return;
         this.credentials = credentials;
-        this.blocked = false;
+        await this.reserve(1);
+        const request: SyncRequest = { action: "bind", installationId: staged.installationId };
+        validateResponse(request, await this.transport(
+          request, credentials, () => this.active && this.currentConfiguration(configuration),
+        ));
+        if (!this.currentConfiguration(configuration)) return;
+        await this.repository.activateEnrollment(staged);
+        if (!this.currentConfiguration(configuration)) return;
         this.blockedError = null;
         this.retryAt = null;
+        this.quotaUntil = null;
         this.retryDelay = 15_000;
         await this.refresh(this.generation, null);
         this.scheduleAt(this.now());
       } catch (error) {
-        if (this.currentConfiguration(configuration)) this.fail(safeError(error), false);
+        if (this.currentConfiguration(configuration)) {
+          if (saved) {
+            try {
+              if (previous) await this.secrets.save(previous);
+              else await this.secrets.remove();
+            } catch {
+              error = new SyncError("The cloud connection could not be saved securely. Replace the connection code.", false, "storage");
+            }
+          }
+          this.credentials = previous;
+          await this.refresh(this.generation).catch(() => undefined);
+          this.fail(safeError(error), false);
+        }
         throw safeError(error);
       } finally {
         this.connecting = false;
@@ -231,23 +232,15 @@ export class SyncController {
     return this.control(async () => {
       this.credentials = null;
       this.clearSchedule();
-      this.blocked = false;
       this.blockedError = null;
+      this.quotaUntil = null;
       this.runAgain = false;
       let failed = false;
-      try {
-        await this.repository.disconnect();
-      } catch {
-        failed = true;
-      }
-      try {
-        await this.secrets.remove();
-      } catch {
-        failed = true;
-      }
+      try { await this.repository.disconnect(); } catch { failed = true; }
+      try { await this.secrets.remove(); } catch { failed = true; }
       await this.refresh(this.generation, null);
       if (failed) {
-        const error = new SyncError("The Sheets connection could not be fully removed. Try again.", true);
+        const error = new SyncError("The cloud connection could not be fully removed. Try again.", true, "storage");
         this.publish({ status: "disconnected", error: error.message });
         throw error;
       }
@@ -256,16 +249,12 @@ export class SyncController {
 
   setLabel(value: string): Promise<void> {
     let label: string;
-    try {
-      label = checkedLabel(value);
-    } catch (error) {
-      return Promise.reject(error);
-    }
+    try { label = checkedLabel(value); } catch (error) { return Promise.reject(error); }
     const generation = ++this.generation;
     this.clearSchedule();
     return this.control(async () => {
       try {
-        if (!this.credentials) throw new SyncError("Connect Sheets before changing the phone label.", false);
+        if (!this.credentials || !this.snapshot.bound) throw new SyncError("Connect cloud uploads before changing the phone label.", false, "invalid");
         await this.repository.setLabel(label);
         await this.refresh(generation);
         this.scheduleAt(this.now());
@@ -285,9 +274,7 @@ export class SyncController {
     if (!this.credentials) return;
     const now = this.now();
     this.firstChangeAt ??= now;
-    this.scheduleAt(
-      immediate ? now : Math.min(now + 10_000, this.firstChangeAt + 60_000),
-    );
+    this.scheduleAt(immediate ? now : Math.min(now + 10_000, this.firstChangeAt + 60_000));
   }
 
   setActive(active: boolean): void {
@@ -297,17 +284,15 @@ export class SyncController {
       ++this.generation;
       this.clearSchedule();
       this.firstChangeAt = null;
-      if (this.credentials && this.snapshot.status === "syncing") {
-        this.publish({ status: this.snapshot.pending > 0 ? "pending" : "synced" });
-      }
+      if (this.credentials && this.snapshot.status === "syncing") this.publish({ status: "pending" });
     } else {
-      this.retryAt = null;
+      this.retryAt = this.quotaUntil;
       this.scheduleAt(this.now());
     }
   }
 
   syncNow(): Promise<void> {
-    if (this.disposed) return Promise.reject(new SyncError("Sync has stopped.", false));
+    if (this.disposed) return Promise.reject(new SyncError("Sync has stopped.", false, "invalid"));
     if (this.syncPromise) return this.syncPromise;
     this.clearSchedule();
     const generation = this.generation;
@@ -319,14 +304,11 @@ export class SyncController {
       this.syncPromise = null;
       this.publish({ busy: this.controls > 0 });
       if (
-        this.credentials &&
-        this.controls === 0 &&
-        this.snapshot.pending > 0 &&
-        this.snapshot.status !== "error" &&
+        this.credentials && this.controls === 0 && this.snapshot.status !== "error" &&
+        this.snapshot.status !== "paused" &&
+        (this.snapshot.pending > 0 || !this.snapshot.initialComplete) &&
         (this.timerAt === null || this.runAgain)
-      ) {
-        this.scheduleAt(this.now() + (this.runAgain ? 0 : 10_000));
-      }
+      ) this.scheduleAt(this.now() + (this.runAgain ? 0 : 10_000));
       this.runAgain = false;
     };
     void promise.then(finish, finish);
@@ -345,14 +327,11 @@ export class SyncController {
     this.queue = promise.catch(() => undefined);
     return promise;
   }
-
   private control(operation: () => Promise<void>): Promise<void> {
     this.controls++;
     this.publish({ busy: true });
     return this.enqueue(async () => {
-      try {
-        await operation();
-      } finally {
+      try { await operation(); } finally {
         this.controls--;
         this.publish({ busy: this.controls > 0 || this.syncPromise !== null });
         if (this.controls === 0 && this.runAgain && this.snapshot.status !== "error") {
@@ -362,143 +341,161 @@ export class SyncController {
       }
     });
   }
-
   private current(generation: number): boolean {
     return !this.disposed && generation === this.generation;
   }
-
   private currentConfiguration(configuration: number): boolean {
     return !this.disposed && configuration === this.configuration;
   }
-
+  private checkStaged(staged: SyncLocalState, credentials: SyncCredentials): void {
+    if (!matches(staged, credentials) || !UUID.test(staged.installationId) ||
+      !Number.isSafeInteger(staged.clock) || staged.clock < 0) {
+      throw new SyncError("The saved installation identity is invalid. Ask the owner for a replacement code.", false, "invalid");
+    }
+  }
   private publish(patch: Partial<SyncViewState>): void {
     if (this.disposed) return;
     this.snapshot = { ...this.snapshot, ...patch };
     for (const listener of this.listeners) listener();
   }
-
-  private async refresh(
-    generation: number,
-    error: string | null | undefined = undefined,
-  ): Promise<void> {
-    const refreshVersion = ++this.refreshVersion;
-    const [state, pending] = await Promise.all([
-      this.repository.state(),
-      this.repository.pendingCount(),
+  private async refresh(generation: number, error: string | null | undefined = undefined): Promise<void> {
+    const version = ++this.refreshVersion;
+    const [state, staged, pending] = await Promise.all([
+      this.repository.state(), this.repository.pendingEnrollment(), this.repository.pendingCount(),
     ]);
-    if (!this.current(generation) || refreshVersion !== this.refreshVersion) return;
+    if (!this.current(generation) || version !== this.refreshVersion) return;
+    const shown = this.credentials && matches(state, this.credentials)
+      ? state : this.credentials && matches(staged, this.credentials) ? staged : state;
     const connected = this.credentials !== null;
+    const bound = connected && matches(state, this.credentials!) && state!.bound && state!.enabled;
     const message = error === undefined ? this.snapshot.error : error;
+    const paused = this.quotaUntil !== null && this.quotaUntil > this.now();
     this.publish({
-      deviceLabel: state?.label ?? "",
+      deviceLabel: shown?.label ?? "",
       pending: connected ? pending : 0,
-      lastSyncedAt: state?.lastSyncedAt ?? null,
+      lastSyncedAt: shown?.lastSyncedAt ?? null,
+      bound,
+      initialComplete: bound && state!.initialComplete,
       error: message,
-      status: !connected
-        ? "disconnected"
-        : message
-          ? "error"
-          : this.snapshot.status === "syncing" && this.syncPromise
-            ? "syncing"
-            : pending > 0
-              ? "pending"
-              : "synced",
+      pausedUntil: paused ? new Date(this.quotaUntil!).toISOString() : null,
+      status: !connected ? "disconnected" : paused ? "paused" : message ? "error" :
+        this.snapshot.status === "syncing" && this.syncPromise ? "syncing" :
+        pending > 0 || !bound || !state!.initialComplete ? "pending" : "synced",
     });
   }
-
   private clearSchedule(): void {
     if (this.timerAt !== null) this.cancel(this.timer);
     this.timer = undefined;
     this.timerAt = null;
   }
-
   private scheduleAt(time: number): void {
-    if (this.disposed || !this.active || !this.credentials || this.blocked) return;
-    const due = Math.max(time, this.retryAt ?? time);
+    if (this.disposed || !this.active || !this.credentials || this.blockedError) return;
+    const due = Math.max(time, this.retryAt ?? time, this.quotaUntil ?? time);
     this.clearSchedule();
     this.timerAt = due;
     this.timer = this.schedule(() => {
       this.timerAt = null;
       this.timer = undefined;
-      if (!this.active || this.disposed || this.blocked || !this.credentials) return;
-      if (this.syncPromise || this.controls > 0) {
-        this.runAgain = true;
-        return;
-      }
+      if (!this.active || this.disposed || this.blockedError || !this.credentials) return;
+      if (this.syncPromise || this.controls > 0) { this.runAgain = true; return; }
       void this.syncNow().catch(() => undefined);
     }, Math.max(0, due - this.now()));
   }
-
   private fail(error: SyncError, retry: boolean): void {
-    if (this.blocked && error.retryable && this.blockedError) {
-      this.publish({
-        status: this.credentials ? "error" : "disconnected",
-        error: this.blockedError,
-      });
+    if (this.blockedError && error.retryable) {
+      this.publish({ status: this.credentials ? "error" : "disconnected", error: this.blockedError });
       this.clearSchedule();
       return;
     }
-    this.publish({ status: this.credentials ? "error" : "disconnected", error: error.message });
-    this.blocked = !error.retryable;
-    this.blockedError = this.blocked ? error.message : null;
-    if (retry && error.retryable && this.credentials) {
-      this.retryAt = this.now() + this.retryDelay;
-      this.retryDelay = Math.min(this.retryDelay * 2, 300_000);
-      this.scheduleAt(this.retryAt);
+    if (!error.retryable) this.blockedError = error.message;
+    if (error.kind === "quota") {
+      this.quotaUntil = Math.max(error.retryAt ?? this.now() + 300_000, this.now() + 1);
+      this.retryAt = this.quotaUntil;
+      this.publish({
+        status: this.credentials ? "paused" : "disconnected",
+        error: error.message,
+        pausedUntil: new Date(this.quotaUntil).toISOString(),
+      });
+      this.scheduleAt(this.quotaUntil);
     } else {
-      this.clearSchedule();
+      this.publish({ status: this.credentials ? "error" : "disconnected", error: error.message });
+      if (retry && error.retryable && this.credentials) {
+        this.retryAt = this.now() + this.retryDelay;
+        this.retryDelay = Math.min(this.retryDelay * 2, 300_000);
+        this.scheduleAt(this.retryAt);
+      } else this.clearSchedule();
     }
   }
-
+  private async reserve(writes: number): Promise<void> {
+    if (this.quotaUntil !== null && this.quotaUntil > this.now()) {
+      throw new SyncError("Cloud uploads are paused until the upload quota resets. Your changes remain saved on this phone.", true, "quota", this.quotaUntil);
+    }
+    const reservation = await this.repository.reserveAttempt(writes, this.now());
+    if (!reservation.allowed) {
+      if (reservation.retryAt === null || !Number.isFinite(reservation.retryAt) || reservation.retryAt <= this.now()) {
+        throw new SyncError("The upload budget could not be verified. Try again.", true, "storage");
+      }
+      throw new SyncError("Cloud uploads are paused until the upload quota resets. Your changes remain saved on this phone.", true, "quota", reservation.retryAt);
+    }
+    this.quotaUntil = null;
+  }
   private async upload(generation: number): Promise<void> {
     if (!this.current(generation)) return;
     try {
-      if (!this.credentials) throw new SyncError("Connect Sheets before syncing.", false);
-      if (!this.active) throw new SyncError("Sync will resume when the app is open.", true);
+      if (!this.credentials) throw new SyncError("Connect cloud uploads before syncing.", false, "invalid");
+      if (!this.active) throw new SyncError("Uploads will resume when the app is open.", true);
       const credentials = this.credentials;
-      const state = await this.repository.state();
+      let [state, staged] = await Promise.all([this.repository.state(), this.repository.pendingEnrollment()]);
       if (!this.current(generation) || !this.active) return;
-      if (!state?.enabled || state.deviceId !== credentials.deviceId) {
-        this.credentials = null;
-        throw new SyncError("Reconnect Sheets to this phone before syncing.", false);
+      if (matches(staged, credentials)) {
+        this.checkStaged(staged!, credentials);
+        await this.reserve(1);
+        if (!this.current(generation) || !this.active) return;
+        const request: SyncRequest = { action: "bind", installationId: staged!.installationId };
+        validateResponse(request, await this.transport(request, credentials, () => this.active && this.current(generation)));
+        if (!this.current(generation) || !this.active) return;
+        await this.repository.activateEnrollment(staged!);
+        state = await this.repository.state();
+        staged = null;
       }
+      if (!state?.enabled || !state.bound || !matches(state, credentials)) {
+        this.credentials = null;
+        throw new SyncError("This installation needs an owner-issued replacement connection code.", false, "auth");
+      }
+      this.checkStaged(state, credentials);
       this.retryAt = null;
       this.firstChangeAt = null;
-      this.publish({ status: "syncing", error: null });
-      for (let batch = 0; batch < 100; batch++) {
+      this.publish({ status: "syncing", error: null, pausedUntil: null });
+      for (let index = 0; index < 100; index++) {
         if (!this.current(generation) || !this.active) return;
-        const captured = await this.repository.pending();
+        const batch = await this.repository.inFlight();
         if (!this.current(generation) || !this.active) return;
-        if (captured.length === 0) break;
-        let request;
-        try {
-          request = makeBatch(
-            credentials,
-            captured.slice(0, MAX_BATCH_ROWS),
-          );
-        } catch {
-          throw new SyncError("The pending sync data is invalid. Reconnect and try again.", false);
+        if (batch === null) break;
+        if (typeof batch.id !== "string" || !batch.id) {
+          throw new SyncError("The saved upload batch is invalid. Try again.", false, "invalid");
         }
-        const count = request.changes!.length;
-        if (count === 0) throw new SyncError("The pending sync data could not be batched.", false);
-        const response = validateResponse(
-          request,
-          await this.transport(request, credentials),
-        );
+        const request: SyncRequest = {
+          action: "upload", installationId: state.installationId,
+          changes: JSON.parse(JSON.stringify(batch.changes)),
+        };
+        makeCommitBody(request, credentials);
+        await this.reserve(request.changes.length);
         if (!this.current(generation) || !this.active) return;
-        if (!response.ok) throw new SyncError(response.error, response.retryable);
-        await this.repository.acknowledge(
-          response.acknowledged,
-          new Date(this.now()).toISOString(),
-        );
-        if (batch === 99) this.runAgain = true;
+        const receipt = validateResponse(request, await this.transport(
+          request, credentials, () => this.active && this.current(generation),
+        ));
+        if (!this.current(generation) || !this.active) return;
+        await this.repository.acknowledge(batch.id, receipt.acknowledged, new Date(this.now()).toISOString());
+        if (index === 99) this.runAgain = true;
       }
       if (!this.current(generation)) return;
-      this.blocked = false;
       this.blockedError = null;
       this.retryDelay = 15_000;
+      this.quotaUntil = null;
       await this.refresh(generation, null);
-      this.publish({ status: this.snapshot.pending > 0 ? "pending" : "synced" });
+      this.publish({
+        status: this.snapshot.pending > 0 || !this.snapshot.initialComplete ? "pending" : "synced",
+      });
     } catch (error) {
       if (!this.current(generation)) return;
       const safe = safeError(error);

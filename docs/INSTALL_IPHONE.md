@@ -2,9 +2,9 @@
 
 The `preview` profile creates a standalone private iPhone app with its JavaScript and assets bundled. After installation, recording and analytics work offline with your Windows PC switched off. This is an EAS internal distribution build. [Expo's preview-build guide](https://docs.expo.dev/tutorial/eas/internal-distribution-builds/)
 
-These instructions are prepared for the owner to run. No Apple account has been enrolled, no device has been registered, and no signed iOS build has been installed as part of writing this guide. Optional Google Sheets setup is separate from Apple signing; app users do not sign in to Google.
+These instructions are prepared for the owner to run. No Apple account has been enrolled, no device has been registered, and no signed iOS build has been installed as part of writing this guide. Optional Firestore setup is separate from Apple signing; app users paste private codes and do not see a Google sign-in screen.
 
-This version adds the native `expo-secure-store` module for connection credentials. Create and install a new EAS binary even if an earlier Workout build is already on the phone. An over-the-air JavaScript update cannot add a native module that the installed binary lacks. [Expo native rebuild guidance](https://docs.expo.dev/develop/development-builds/introduction/#rebuild-when-native-code-changes)
+This version uses native `expo-secure-store` for private connection credentials and adds `expo-crypto` for secure installation identities. Create and install a new EAS binary even if an earlier Workout build is already on the phone. An over-the-air JavaScript update cannot add a native module that the installed binary lacks. [Expo native rebuild guidance](https://docs.expo.dev/develop/development-builds/introduction/#rebuild-when-native-code-changes)
 
 ## 1. Accounts and prerequisites
 
@@ -54,13 +54,24 @@ If prompted, open **Settings > Privacy & Security > Developer Mode**, turn it on
 
 Stop the PC's development server and test Workout in airplane mode. Create a plan, record values, wait for **Saved**, force-close, and reopen. Finish the [device checklist](DEVICE_CHECKLIST.md).
 
-## Optional private Google Sheets connection
+## Optional private Firestore connection
 
-Follow [Private Google Sheets sync](GOOGLE_SHEETS.md) after the owner authorizes and deploys the Apps Script server. Keep the workbook private. The owner configures only device IDs and token hashes, and gives each phone its own private connection code. Credentials are not part of the EAS build, app bundle, or public environment variables.
+Follow [Private Firestore uploads](FIREBASE.md). The owner configures Firebase Authentication, deploys the upload-only rules, and issues separate private codes for the two authorized phones. The project is ready on Spark without billing in `us-central1`: device authentication, rules, indexes, and two private codes are provisioned, and synthetic live REST verification passed. Each installed iPhone still needs its first connection and device acceptance checks. Keep real codes and cloud/account identifiers outside source files.
 
-In Workout's **Settings > Google Sheets**, paste that phone's code, set a recognizable phone label, review the profile and full-history upload explanation, and explicitly consent before connecting. This uploads optional profile fields and journal rows to the spreadsheet owner. Recording and analytics continue to work offline; pending uploads retry when the app is open. Local Saved and uploaded Up to date are separate states.
+In Workout's **Settings > Database uploads**, choose **Connect Database**, paste that phone's private code, set a recognizable phone label, review the profile and full-history upload explanation, and explicitly consent. There is no account sign-in screen for app users. Credentials are not part of the EAS build, app bundle, or public environment variables.
 
-Complete the real endpoint and two-phone checks in the [device checklist](DEVICE_CHECKLIST.md). The browser demo does not send data to Google. The cloud copy is for reporting; keep JSON exports for phone recovery because the app does not download or restore a journal from Sheets.
+Connecting binds this installation to its upload generation before uploading records. Settings shows pending records, last upload, and whether the initial history is complete. Recording and analytics work offline; pending changes retry while the app is open. **Saved** confirms local durability, while **Up to date** describes uploads. Quota pauses show the next automatic attempt and retain pending data.
+
+Complete the live Firebase and two-phone checks in the [device checklist](DEVICE_CHECKLIST.md). The browser demo does not contact Firebase. The app never reads or restores history from Firestore; keep JSON exports for recovery.
+
+Before upgrading an existing installation to SQLite schema version 5, the native app preserves a validated JSON journal copy in its original schema in private storage, using a file named for the source/destination database versions. After the upgrade, use **Settings > Backup & restore > Export pre-migration backup** when that button is available. Save the shared file outside the app before uninstalling or replacing the phone.
+
+## Verify this release
+
+Home's **+** opens **Workout Plans**. Create and edit there, choose Weekly or Every 2 weeks, and review the dated two-week preview. Existing custom schedules remain unchanged until their recurrence is explicitly changed. Record working and optional warm-up sets, then check the next-workout recommendation in Analytics. Body-weight entries are optional and editable in Settings or Analytics. No effort rating is required.
+
+Backups exported by this release use JSON version 2. Earlier version 1 backups can still be restored. Install over the existing app rather than uninstalling so that the version 5 migration can preserve the existing journal, credentials, and in-flight uploads.
+
 ## Updates, signing expiry, and a second person
 
 Export a backup before every update. Re-run the preview build command after source changes and install over the existing app using the same bundle identifier and Apple team. Do not uninstall first; uninstalling removes local app storage. There is no automatic over-the-air update configuration in this version.
@@ -79,7 +90,7 @@ For the second person, run `device:create` for their iPhone, then create a new p
 npx eas-cli@latest build:resign --platform ios
 ```
 
-Give them that newly signed build's installation link. Their journal starts empty and stays separate. If both phones upload to Sheets, provide a different device code and phone label for each; never connect both under the same device ID. Internal build links can allow access without an Expo login by default; change this in the project's Expo settings if desired. Newly enrolled/renewed Apple accounts can encounter Apple's 24–72-hour processing delay for a new device; rebuild/re-sign after it clears. [Device registration and access](https://docs.expo.dev/build/internal-distribution/)
+Give them that newly signed build's installation link. Their journal starts empty and stays separate. If both phones upload to Firestore, the owner must issue a different device code and phone label for each; never copy one phone's code to the other. For a replacement installation, restore its JSON backup first and request a fresh upload generation from the owner. Internal build links can allow access without an Expo login by default; change this in the project's Expo settings if desired. Newly enrolled/renewed Apple accounts can encounter Apple's 24–72-hour processing delay for a new device; rebuild/re-sign after it clears. [Device registration and access](https://docs.expo.dev/build/internal-distribution/)
 
 ## Development preview and troubleshooting
 

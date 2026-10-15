@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { AppState, Platform } from "react-native";
+import * as Crypto from "expo-crypto";
 import { useApp } from "../data/store";
 import { syncRepository } from "../data/persistence";
 import { SyncController } from "./controller";
@@ -14,8 +15,10 @@ import {
   loadCredentials,
   saveCredentials,
   removeCredentials,
+  loadRefreshToken,
+  saveRefreshToken,
 } from "./credentials";
-import { requestSync } from "./transport";
+import { createSyncTransport } from "./transport";
 import { createPreviewTransport } from "./previewTransport";
 
 const Context = createContext<SyncController | null>(null);
@@ -31,7 +34,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           save: saveCredentials,
           remove: removeCredentials,
         },
-        Platform.OS === "web" ? createPreviewTransport() : requestSync,
+        Platform.OS === "web" ? createPreviewTransport() : createSyncTransport(undefined, { loadRefreshToken, saveRefreshToken }),
+        { createInstallationId: () => Crypto.randomUUID() },
       ),
   );
   useEffect(() => {

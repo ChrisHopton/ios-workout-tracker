@@ -30,3 +30,6 @@ export async function importFile(): Promise<string | null> {
     input.click();
   });
 }
+
+export function migrationBackupAvailable(): boolean { return false; }
+export async function exportMigrationBackup(): Promise<void> { throw new Error("No native migration backup in this preview."); }

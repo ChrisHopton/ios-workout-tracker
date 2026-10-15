@@ -54,7 +54,7 @@ test("version one journals migrate atomically and release the old copy", async (
     );
     assert.equal(
       sql.native.prepare("PRAGMA user_version").get()?.user_version,
-      3,
+      5,
     );
     assert.deepEqual(await createJournalStorage(sql.db).load(), data);
   } finally {
@@ -175,8 +175,9 @@ test("migration commit failure restores the legacy table and version before retr
     sql.native
       .prepare("INSERT INTO app_state VALUES (1, ?)")
       .run(JSON.stringify(data));
-    sql.failCommit();
     const store = createJournalStorage(sql.db);
+    await store.sync.state();
+    sql.failCommit();
     await assert.rejects(store.load(), /commit failure/);
     assert.equal(
       sql.native.prepare("SELECT value FROM app_state").get()?.value,

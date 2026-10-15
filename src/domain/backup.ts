@@ -1,4 +1,24 @@
-import { AppData, EQUIPMENT, MUSCLE_GROUPS, WorkoutTemplate } from "./types";
+import { AppData, EQUIPMENT, MUSCLE_GROUPS, WorkoutRecurrence, WorkoutSession, WorkoutTemplate } from "./types";
+import { addDays } from "./dates";
+import { templateOccursOn } from "./schedule";
+
+export type LegacyTemplate = Omit<WorkoutTemplate, "recurrence">;
+type LegacySessionExercise = Omit<WorkoutSession["exercises"][number], "sets" | "suggestion"> & {
+  sets: Omit<WorkoutSession["exercises"][number]["sets"][number], "classification">[];
+  suggestion: Omit<WorkoutSession["exercises"][number]["suggestion"], "algorithmVersion">;
+};
+export type LegacyAppData = Omit<AppData, "schemaVersion" | "bodyWeights" | "templates" | "scheduleRevisions" | "sessions"> & {
+  schemaVersion: 1;
+  templates: LegacyTemplate[];
+  scheduleRevisions: {
+    id: string;
+    effectiveDate: string;
+    anchorMonday: string;
+    slots: { weekday: number; workoutIds: string[] }[];
+    templates: LegacyTemplate[];
+  }[];
+  sessions: (Omit<WorkoutSession, "exercises"> & { exercises: LegacySessionExercise[] })[];
+};
 
 export const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
 type ObjectValue = Record<string, unknown>;
@@ -14,7 +34,7 @@ function object(value: unknown, path: string, keys: string[]): ObjectValue {
       fail(`${path}.${key}`, "is missing");
   for (const key of Object.keys(item))
     if (!keys.includes(key))
-      fail(`${path}.${key}`, "is not supported in version 1");
+      fail(`${path}.${key}`, "is not supported in this version");
   return item;
 }
 function string(
@@ -127,6 +147,7 @@ function target(value: unknown, path: string): ObjectValue {
 function templates(
   value: unknown,
   path: string,
+  version: 1 | 2,
   exerciseIds?: Set<unknown>,
 ): WorkoutTemplate[] {
   const items = array(value, path, 1000).map((value, index) => {
@@ -138,6 +159,7 @@ function templates(
       "weekdays",
       "archived",
       "updatedAt",
+      ...(version === 2 ? ["recurrence"] : []),
     ]);
     string(item.id, `${at}.id`, 100);
     string(item.title, `${at}.title`, 120);
@@ -149,6 +171,33 @@ function templates(
       number(day, `${at}.weekdays[${index}]`, 0, 6, true),
     );
     unique(days, `${at}.weekdays`);
+    if (version === 2) {
+      const raw = item.recurrence as ObjectValue | null;
+      const kind = raw && choice(raw.kind, `${at}.recurrence.kind`, ["weekly", "biweekly", "legacy"]);
+      const recurrence = object(raw, `${at}.recurrence`, kind === "weekly"
+        ? ["kind"]
+        : kind === "biweekly"
+          ? ["kind", "anchorMonday"]
+          : ["kind", "anchorMonday", "weekdaysA", "weekdaysB"]);
+      if (kind !== "weekly") {
+        const anchor = date(recurrence.anchorMonday, `${at}.recurrence.anchorMonday`);
+        if (new Date(`${anchor}T00:00:00.000Z`).getUTCDay() !== 1)
+          fail(`${at}.recurrence.anchorMonday`, "must be a Monday");
+      }
+      if (kind === "legacy") {
+        for (const key of ["weekdaysA", "weekdaysB"]) {
+          const cycleDays = array(recurrence[key], `${at}.recurrence.${key}`, 7);
+          for (const day of cycleDays) {
+            number(day, `${at}.recurrence.${key}`, 0, 6, true);
+            if (!days.includes(day)) fail(`${at}.recurrence.${key}`, "must use selected weekdays");
+          }
+          unique(cycleDays, `${at}.recurrence.${key}`);
+        }
+        const cycleDays = [...recurrence.weekdaysA as number[], ...recurrence.weekdaysB as number[]];
+        if (days.some((day) => !cycleDays.includes(day as number)))
+          fail(`${at}.recurrence`, "must schedule every selected weekday in at least one week");
+      }
+    }
     const targets = array(item.exercises, `${at}.exercises`, 100, 1).map(
       (entry, index) => target(entry, `${at}.exercises[${index}]`),
     );
@@ -170,12 +219,19 @@ function templates(
     items.map((item) => item.id),
     `${path}.id`,
   );
-  for (let day = 0; day < 7; day++)
+  if (version === 1) for (let day = 0; day < 7; day++)
     if (
       items.filter((item) => !item.archived && item.weekdays.includes(day))
         .length > 2
     )
       fail(path, `assigns more than two active workouts to weekday ${day}`);
+  if (version === 2) {
+    for (let offset = 0; offset < 14; offset++) {
+      const date = addDays("2000-01-03", offset);
+      if (items.filter((item) => templateOccursOn(item, date)).length > 1)
+        fail(path, "contains conflicting workout recurrences");
+    }
+  }
   return items;
 }
 function draft(value: unknown, path: string, reps: boolean): string {
@@ -186,7 +242,7 @@ function draft(value: unknown, path: string, reps: boolean): string {
     fail(path, "exceeds the supported range");
   return result;
 }
-export function validateData(value: unknown, previous?: AppData): AppData {
+function validateVersion(value: unknown, version: 1 | 2, previous?: AppData): ObjectValue {
   const data = object(value, "backup", [
     "schemaVersion",
     "settings",
@@ -194,9 +250,10 @@ export function validateData(value: unknown, previous?: AppData): AppData {
     "templates",
     "scheduleRevisions",
     "sessions",
+    ...(version === 2 ? ["bodyWeights"] : []),
   ]);
-  if (data.schemaVersion !== 1)
-    fail("schemaVersion", "must be 1; this backup may need a newer app");
+  if (data.schemaVersion !== version)
+    fail("schemaVersion", `must be ${version}; this backup may need a newer app`);
   const settings = object(data.settings, "settings", [
     "age",
     "gender",
@@ -213,6 +270,19 @@ export function validateData(value: unknown, previous?: AppData): AppData {
   if (settings.heightCm !== null)
     number(settings.heightCm, "settings.heightCm", 1, 300);
   choice(settings.unit, "settings.unit", ["lb", "kg"]);
+  if (version === 2) {
+    const weights = array(data.bodyWeights, "bodyWeights", 20000).map((value, index) => {
+      const at = `bodyWeights[${index}]`;
+      const entry = object(value, at, ["id", "date", "weightKg", "updatedAt"]);
+      string(entry.id, `${at}.id`, 100);
+      date(entry.date, `${at}.date`);
+      number(entry.weightKg, `${at}.weightKg`, Number.MIN_VALUE, 500);
+      timestamp(entry.updatedAt, `${at}.updatedAt`);
+      return entry;
+    });
+    unique(weights.map((entry) => entry.id), "bodyWeights.id");
+    unique(weights.map((entry) => entry.date), "bodyWeights.date");
+  }
   const exercises = array(data.exercises, "exercises", 5000).map(
     (item, index) => exercise(item, `exercises[${index}]`),
   );
@@ -223,6 +293,7 @@ export function validateData(value: unknown, previous?: AppData): AppData {
   templates(
     data.templates,
     "templates",
+    version,
     new Set(exercises.map((item) => item.id)),
   );
   const revisions = array(
@@ -243,13 +314,14 @@ export function validateData(value: unknown, previous?: AppData): AppData {
     const anchor = date(item.anchorMonday, `${at}.anchorMonday`);
     if (new Date(`${anchor}T00:00:00.000Z`).getUTCDay() !== 1)
       fail(`${at}.anchorMonday`, "must be a Monday");
-    const snapshots = templates(item.templates, `${at}.templates`);
+    const snapshots = templates(item.templates, `${at}.templates`, version);
     const slots = array(item.slots, `${at}.slots`, 7).map((value, index) => {
       const slotAt = `${at}.slots[${index}]`;
       const slot = object(value, slotAt, ["weekday", "workoutIds"]);
       number(slot.weekday, `${slotAt}.weekday`, 0, 6, true);
-      const ids = array(slot.workoutIds, `${slotAt}.workoutIds`, 2);
+      const ids = array(slot.workoutIds, `${slotAt}.workoutIds`, 2, version === 2 ? 2 : 0);
       ids.forEach((id, index) => {
+        if (version === 2 && id === null) return;
         string(id, `${slotAt}.workoutIds[${index}]`, 100);
         const workout = snapshots.find((template) => template.id === id);
         if (
@@ -262,13 +334,22 @@ export function validateData(value: unknown, previous?: AppData): AppData {
             "must reference an active snapshot assigned to this weekday",
           );
       });
-      unique(ids, `${slotAt}.workoutIds`);
+      if (version === 1) unique(ids, `${slotAt}.workoutIds`);
       return slot;
     });
     unique(
       slots.map((slot) => slot.weekday),
       `${at}.slots.weekday`,
     );
+    if (version === 2) {
+      for (let offset = 0; offset < 14; offset++) {
+        const day = offset % 7;
+        const expected = snapshots.find((snapshot) => templateOccursOn(snapshot, addDays(anchor, offset)))?.id ?? null;
+        const slot = slots.find((candidate) => candidate.weekday === day);
+        const actual = slot ? (slot.workoutIds as (string | null)[])[Math.floor(offset / 7)] : null;
+        if (actual !== expected) fail(`${at}.slots`, "must match the snapshot recurrences");
+      }
+    }
     for (const snapshot of snapshots.filter((template) => !template.archived))
       for (const day of snapshot.weekdays) {
         if (
@@ -344,7 +425,10 @@ export function validateData(value: unknown, previous?: AppData): AppData {
           const suggestion = object(entry.suggestion, `${entryAt}.suggestion`, [
             "weights",
             "reason",
+            ...(version === 2 ? ["algorithmVersion"] : []),
           ]);
+          if (version === 2 && suggestion.algorithmVersion !== 1 && suggestion.algorithmVersion !== 2)
+            fail(`${entryAt}.suggestion.algorithmVersion`, "must be 1 or 2");
           string(suggestion.reason, `${entryAt}.suggestion.reason`, 2000);
           const weights = array(
             suggestion.weights,
@@ -376,7 +460,8 @@ export function validateData(value: unknown, previous?: AppData): AppData {
             prescription.sets as number,
           ).forEach((value, index) => {
             const setAt = `${entryAt}.sets[${index}]`;
-            const set = object(value, setAt, ["weight", "reps", "status"]);
+            const set = object(value, setAt, ["weight", "reps", "status", ...(version === 2 ? ["classification"] : [])]);
+            if (version === 2) choice(set.classification, `${setAt}.classification`, ["working", "warmup"]);
             const weight = draft(set.weight, `${setAt}.weight`, false);
             const reps = draft(set.reps, `${setAt}.reps`, true);
             choice(set.status, `${setAt}.status`, [
@@ -437,7 +522,86 @@ export function validateData(value: unknown, previous?: AppData): AppData {
     sessions.map((item) => item.date),
     "sessions.date",
   );
-  return data as unknown as AppData;
+  return data;
+}
+
+export function validateData(value: unknown, previous?: AppData): AppData {
+  return validateVersion(value, 2, previous) as unknown as AppData;
+}
+
+export function validateLegacyData(value: unknown): LegacyAppData {
+  return validateVersion(value, 1) as unknown as LegacyAppData;
+}
+
+export function validateStoredData(value: unknown): LegacyAppData | AppData {
+  if (value && typeof value === "object") {
+    if ((value as ObjectValue).schemaVersion === 1) return validateLegacyData(value);
+    if ((value as ObjectValue).schemaVersion === 2) return validateData(value);
+  }
+  return fail("schemaVersion", "must be 1 or 2; this backup may need a newer app");
+}
+
+function upgradedTemplate(template: LegacyTemplate, anchorMonday: string, slots: { weekday: number; workoutIds: string[] }[]): WorkoutTemplate {
+  const weekdaysA = template.weekdays.filter((day) => slots.find((slot) => slot.weekday === day)?.workoutIds[0] === template.id);
+  const weekdaysB = template.weekdays.filter((day) => {
+    const ids = slots.find((slot) => slot.weekday === day)?.workoutIds;
+    return ids?.[ids.length === 1 ? 0 : 1] === template.id;
+  });
+  let recurrence: WorkoutRecurrence;
+  if (weekdaysA.length === template.weekdays.length && weekdaysB.length === template.weekdays.length)
+    recurrence = { kind: "weekly" };
+  else if (weekdaysA.length === template.weekdays.length && weekdaysB.length === 0)
+    recurrence = { kind: "biweekly", anchorMonday };
+  else if (weekdaysB.length === template.weekdays.length && weekdaysA.length === 0)
+    recurrence = { kind: "biweekly", anchorMonday: addDays(anchorMonday, 7) };
+  else
+    recurrence = { kind: "legacy", anchorMonday, weekdaysA, weekdaysB };
+  return { ...template, weekdays: [...template.weekdays], exercises: template.exercises.map((entry) => ({ ...entry })), recurrence };
+}
+
+export function upgradeData(value: unknown): AppData {
+  const legacy = validateStoredData(value);
+  if (legacy.schemaVersion === 2) return legacy;
+  const latest = [...legacy.scheduleRevisions].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
+  const anchorMonday = latest?.anchorMonday ?? "2000-01-03";
+  const currentSlots = Array.from({ length: 7 }, (_, weekday) => {
+    const assigned = legacy.templates.filter((template) => !template.archived && template.weekdays.includes(weekday)).map((template) => template.id);
+    const existing = latest?.slots.find((slot) => slot.weekday === weekday)?.workoutIds ?? [];
+    return { weekday, workoutIds: [...existing.filter((id) => assigned.includes(id)), ...assigned.filter((id) => !existing.includes(id))] };
+  });
+  const upgraded: AppData = {
+    ...legacy,
+    schemaVersion: 2,
+    settings: { ...legacy.settings },
+    bodyWeights: [],
+    exercises: legacy.exercises.map((exercise) => ({ ...exercise })),
+    templates: legacy.templates.map((template) => template.archived
+      ? { ...template, weekdays: [...template.weekdays], exercises: template.exercises.map((entry) => ({ ...entry })), recurrence: { kind: "weekly" } }
+      : upgradedTemplate(template, anchorMonday, currentSlots)),
+    scheduleRevisions: legacy.scheduleRevisions.map((revision) => ({
+      ...revision,
+      slots: revision.slots.map((slot) => ({
+        ...slot,
+        workoutIds: slot.workoutIds.length === 0
+          ? [null, null]
+          : slot.workoutIds.length === 1 ? [slot.workoutIds[0], slot.workoutIds[0]] : [...slot.workoutIds],
+      })),
+      templates: revision.templates.map((template) => template.archived
+        ? { ...template, weekdays: [...template.weekdays], exercises: template.exercises.map((entry) => ({ ...entry })), recurrence: { kind: "weekly" } }
+        : upgradedTemplate(template, revision.anchorMonday, revision.slots)),
+    })),
+    sessions: legacy.sessions.map((session) => ({
+      ...session,
+      exercises: session.exercises.map((entry) => ({
+        ...entry,
+        exercise: { ...entry.exercise },
+        target: { ...entry.target },
+        suggestion: { ...entry.suggestion, weights: [...entry.suggestion.weights], algorithmVersion: 1 },
+        sets: entry.sets.map((set) => ({ ...set, classification: "working" })),
+      })),
+    })),
+  };
+  return validateData(upgraded);
 }
 function byteLength(text: string): number {
   // Count UTF8 bytes without adding a native dependency
@@ -477,10 +641,18 @@ export function parseBackup(text: string): AppData {
       "This file is not valid JSON. Choose a Workout backup exported from Settings.",
     );
   }
-  return validateData(value);
+  return upgradeData(value);
 }
 export function serializeBackup(data: AppData): string {
   validateData(data);
+  const text = JSON.stringify(data);
+  if (byteLength(text) > MAX_BACKUP_BYTES)
+    throw new Error("Backup exceeds the 10 MiB size limit.");
+  return text;
+}
+
+export function serializeStoredBackup(data: LegacyAppData | AppData): string {
+  validateStoredData(data);
   const text = JSON.stringify(data);
   if (byteLength(text) > MAX_BACKUP_BYTES)
     throw new Error("Backup exceeds the 10 MiB size limit.");

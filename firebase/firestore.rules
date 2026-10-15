@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function uuid(value) {
+      return value is string && value.matches('[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
+    }
+    function authorized(deviceId, generationId) {
+      let authorization = get(/databases/$(database)/documents/uploadAuthorizations/$(request.auth.uid)).data;
+      return request.auth != null && authorization.enabled == true
+        && authorization.deviceId == deviceId && authorization.generationId == generationId;
+    }
+    function binding(deviceId, generationId) {
+      let data = request.resource.data;
+      return data.keys().hasAll(['schemaVersion', 'deviceId', 'generationId', 'installationId'])
+        && data.keys().hasOnly(['schemaVersion', 'deviceId', 'generationId', 'installationId'])
+        && data.schemaVersion == 1 && uuid(deviceId) && uuid(generationId)
+        && data.deviceId == deviceId && data.generationId == generationId && uuid(data.installationId);
+    }
+    function enrolled(deviceId, generationId) {
+      let enrollment = get(/databases/$(database)/documents/devices/$(deviceId)/generations/$(generationId)).data;
+      return enrollment.schemaVersion == 1 && enrollment.deviceId == deviceId
+        && enrollment.generationId == generationId
+        && enrollment.installationId == request.resource.data.installationId;
+    }
+    function record(deviceId, generationId, key) {
+      let data = request.resource.data;
+      return data.keys().hasAll(['schemaVersion', 'deviceId', 'generationId', 'installationId', 'key', 'kind', 'revision', 'deleted', 'payload'])
+        && data.keys().hasOnly(['schemaVersion', 'deviceId', 'generationId', 'installationId', 'key', 'kind', 'revision', 'deleted', 'payload'])
+        && data.schemaVersion == 1 && data.deviceId == deviceId && data.generationId == generationId
+        && uuid(deviceId) && uuid(generationId) && uuid(data.installationId)
+        && data.key == key && key.size() > 0 && key.size() <= 1500
+        && data.kind in ['profile', 'body_weight', 'exercise', 'plan', 'schedule', 'schedule_template', 'workout', 'workout_exercise', 'completion']
+        && data.revision is int && data.revision > 0 && data.revision <= 9007199254740991
+        && data.deleted is bool && data.payload is map
+        && (data.deleted == false || data.payload.size() == 0)
+        && ((data.kind == 'completion' && key == 'completion' && data.deleted == false
+             && data.payload.keys().hasOnly(['initialUploadComplete']) && data.payload.initialUploadComplete == true)
+            || (data.kind != 'completion' && key.matches(data.kind + ':' + deviceId + ':.+')));
+    }
+    match /devices/{deviceId}/generations/{generationId} {
+      allow create: if request.auth != null && authorized(deviceId, generationId) && binding(deviceId, generationId);
+      allow update: if request.auth != null && authorized(deviceId, generationId)
+        && binding(deviceId, generationId) && request.resource.data == resource.data;
+      allow read, delete: if false;
+      match /records/{key} {
+        allow create: if request.auth != null && authorized(deviceId, generationId)
+          && record(deviceId, generationId, key) && enrolled(deviceId, generationId);
+        allow update: if request.auth != null && authorized(deviceId, generationId)
+          && record(deviceId, generationId, key) && enrolled(deviceId, generationId)
+          && (request.resource.data.revision > resource.data.revision || request.resource.data == resource.data);
+        allow read, delete: if false;
+      }
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

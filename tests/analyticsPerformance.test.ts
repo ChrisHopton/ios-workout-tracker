@@ -21,13 +21,14 @@ const plan: WorkoutTemplate = {
   id: "plan",
   title: "Workout",
   exercises: [target],
+  recurrence: { kind: "weekly" },
   weekdays: [0],
   archived: false,
   updatedAt: "2025-01-01T12:00:00Z",
 };
 
 function completedSet(weight: string, reps: string): RecordedSet {
-  return { weight, reps, status: "completed" };
+  return { classification: "working", weight, reps, status: "completed" };
 }
 
 function session(
@@ -48,13 +49,13 @@ function session(
     exercises: [{
       exercise: definition,
       target,
-      suggestion: { weights: [], reason: "" },
+      suggestion: { algorithmVersion: 1, weights: [], reason: "" },
       sets: Array.from({ length: target.sets }, () => completedSet(weight, "12")),
     }],
   };
 }
 
-test("recommendations find the latest two comparable workouts in unordered history", () => {
+test("recommendations reuse the latest demonstrated load with changed targets in unordered history", () => {
   const data = initialData();
   const definition = data.exercises[0];
   const older = session(definition, "2025-01-06");
@@ -70,7 +71,7 @@ test("recommendations find the latest two comparable workouts in unordered histo
   const original = structuredClone(data);
   assert.deepEqual(
     suggestWeights(data, target, definition, "2025-01-20", "lb").weights,
-    [105, 105, 105],
+    [300, 300, 300],
   );
   assert.deepEqual(data, original);
 });

@@ -16,6 +16,7 @@ function fixture(): AppData {
     id: "workout-1",
     title: "Leg day",
     exercises: [{ exerciseId: exercise.id, sets: 2, repMin: 8, repMax: 12 }],
+    recurrence: { kind: "weekly" },
     weekdays: [0],
     archived: false,
     updatedAt: at,
@@ -26,7 +27,7 @@ function fixture(): AppData {
       id: "revision-1",
       effectiveDate: "2026-10-10",
       anchorMonday: "2026-10-05",
-      slots: [{ weekday: 0, workoutIds: [template.id] }],
+      slots: [{ weekday: 0, workoutIds: [template.id, template.id] }],
       templates: [structuredClone(template)],
     },
   ];
@@ -46,12 +47,13 @@ function fixture(): AppData {
           exercise: structuredClone(exercise),
           target: structuredClone(template.exercises[0]),
           suggestion: {
+            algorithmVersion: 1,
             weights: [22.25, 22.25],
             reason: "Repeat previous weights.",
           },
           sets: [
-            { weight: "22.25", reps: "12", status: "completed" },
-            { weight: "", reps: "", status: "pending" },
+            { classification: "working", weight: "22.25", reps: "12", status: "completed" },
+            { classification: "working", weight: "", reps: "", status: "pending" },
           ],
         },
       ],
@@ -94,7 +96,7 @@ test("allows unfinished numeric drafts without considering them completed sets",
 test("rejects malformed JSON, versions, missing fields, unknown properties and oversize input", () => {
   assert.throws(() => parseBackup("{"), /not valid JSON/);
   assert.throws(
-    () => parseBackup(JSON.stringify({ ...initialData(), schemaVersion: 2 })),
+    () => parseBackup(JSON.stringify({ ...initialData(), schemaVersion: 3 })),
     /schemaVersion/,
   );
   assert.throws(
@@ -150,25 +152,25 @@ test("rejects broken current references while validating historical schedules in
     data.templates[0].exercises[0].exerciseId = "missing";
   }, /existing exercise/);
   rejectsMutation((data) => {
-    data.scheduleRevisions[0].slots[0].workoutIds = ["missing"];
+    data.scheduleRevisions[0].slots[0].workoutIds = ["missing", "missing"];
   }, /active snapshot/);
   rejectsMutation((data) => {
     data.scheduleRevisions[0].templates[0].weekdays = [1];
   }, /active snapshot/);
   rejectsMutation((data) => {
     data.scheduleRevisions[0].slots = [];
-  }, /every active/);
+  }, /snapshot recurrences/);
 });
 test("rejects more than two workouts per day and inconsistent set/suggestion counts", () => {
   rejectsMutation((data) => {
     data.scheduleRevisions[0].slots[0].workoutIds = ["a", "b", "c"];
-  }, /between 0 and 2/);
+  }, /between 2 and 2/);
   rejectsMutation((data) => {
     data.templates.push(
       { ...data.templates[0], id: "b" },
       { ...data.templates[0], id: "c" },
     );
-  }, /more than two/);
+  }, /conflicting workout recurrences/);
   rejectsMutation((data) => {
     data.sessions[0].exercises[0].sets.pop();
   }, /between 2 and 2/);

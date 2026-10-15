@@ -214,6 +214,15 @@ export default function RecordWorkout() {
           </Row>
           {e.sets.map((set, si) => (
             <View key={si} style={{ gap: 6 }}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={e.exercise.name + " set " + (si + 1) + " type: " + (set.classification === "warmup" ? "Warm-up" : "Working") + ". Tap to change."}
+                disabled={future || busy}
+                onPress={() => editSet(ei, si, { classification: set.classification === "warmup" ? "working" : "warmup" })}
+                style={{ minHeight: 44, justifyContent: "center", alignSelf: "flex-start", paddingHorizontal: 12, backgroundColor: t.bg, borderRadius: 12 }}
+              >
+                <Txt muted style={{ fontSize: 12 }}>{set.classification === "warmup" ? "Warm-up" : "Working set"} · tap to change</Txt>
+              </Pressable>
               <Row style={{ gap: 8 }}>
                 <Txt bold style={{ width: 26 }}>
                   {si + 1}
@@ -236,7 +245,7 @@ export default function RecordWorkout() {
                       editable={!future && !busy}
                       keyboardType="decimal-pad"
                       placeholder={
-                        e.suggestion.weights[si] === null
+                        set.classification === "warmup" || e.suggestion.weights[si] == null
                           ? "—"
                           : String(e.suggestion.weights[si])
                       }
@@ -318,7 +327,8 @@ export default function RecordWorkout() {
                 </Txt>
               ) : (
                 e.exercise.equipment !== "bodyweight" &&
-                e.suggestion.weights[si] !== null &&
+                set.classification !== "warmup" &&
+                e.suggestion.weights[si] != null &&
                 !set.weight && (
                   <Pressable
                     disabled={future || busy}
@@ -370,7 +380,7 @@ export default function RecordWorkout() {
       )}
       <Txt muted style={{ fontSize: 12, textAlign: "center" }}>
         Suggestions are based on your recorded training. Adjust the weight to
-        suit how you feel.
+        suit how you feel. Warm-ups do not count toward working-set progression or strength analytics.
       </Txt>
     </Screen>
   );

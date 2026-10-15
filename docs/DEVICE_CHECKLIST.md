@@ -1,6 +1,6 @@
 # iPhone acceptance checklist
 
-Run on physical iPhones using a fresh standalone `preview` build that includes `expo-secure-store`. These boxes remain unchecked until someone performs them. Automated checks and a browser preview cannot verify signing, native SQLite or secure storage, system file/share pickers, keyboards, or real Google Sheets uploads. Browser sync is a local mock.
+Run on physical iPhones using a fresh standalone `preview` build that includes `expo-secure-store` and `expo-crypto`. These boxes remain unchecked until someone performs them. Automated checks and a browser preview cannot verify signing, native SQLite or secure storage, system file/share pickers, keyboards, or real Firestore uploads. Browser sync is a local mock.
 
 Record device, iOS version, build number, tester, and date here:
 
@@ -42,33 +42,49 @@ Record device, iOS version, build number, tester, and date here:
 - [ ] Change pounds/kilograms and height units; historical weights convert appropriately without changing stored session units or losing fractions.
 - [ ] Save optional demographics, close/reopen, and confirm they persist without changing progression rules.
 
-## Optional Google Sheets uploads
+## Optional Firestore uploads
 
-Complete the owner deployment and private setup in [Google Sheets setup](GOOGLE_SHEETS.md). Keep real connection codes and account/project identifiers out of this checklist.
+Complete the owner deployment and private setup in [Firestore setup](FIREBASE.md). The Spark project, device authentication, rules/index deployment, and two private unbound codes are ready. Synthetic live uploads and security tests passed; complete the installed-phone checks below. Keep real codes and account/project identifiers out of this checklist and its screenshots.
 
-- [ ] Confirm the owner spreadsheet is Restricted, the owner-authorized `/exec` endpoint is deployed, the Advanced Sheets service is enabled, and separate hashes are configured for the two phones.
-- [ ] Before connection, verify the app works offline and no Google sign-in is required by app users.
-- [ ] Open Settings > Google Sheets. Confirm the profile/full-history upload explanation is visible, and connection requires an explicit consent checkbox, phone label, and private code.
-- [ ] Connect the first phone. Verify its label and device ID in People, profile fields match, and exercises, plans, schedule revisions, workouts, and sets use that Device ID. Confirm optional age, gender, and height are visible to the owner when supplied and connected.
-- [ ] Verify the native client follows the Apps Script Content Service redirect and clears pending rows only after valid JSON acknowledgments. Confirm pending count reaches zero and last upload updates.
-- [ ] Distinguish Saved from Up to date: go offline, record several rapid edits, and verify local Saved appears while uploads stay pending. Force-close, reopen, reconnect, and confirm only the latest row values upload without duplicates.
-- [ ] Edit a finished set and confirm its existing spreadsheet row updates. Delete a local record and confirm the visible row clears while the hidden revision ledger retains the deletion marker.
-- [ ] Rename an exercise or alter a plan and verify previously recorded session snapshots remain intact in the Sheet.
-- [ ] Rename the phone label and confirm People updates while historical Device IDs stay stable.
-- [ ] Connect the second phone with its different code. Confirm independent local data, distinct device namespaces, and no mixing even if record IDs match.
-- [ ] Background and reopen each phone during an upload. Verify pending data remains and retries on the next active session; no immediate background upload is assumed.
-- [ ] Test invalid and revoked codes. Confirm visible errors, local recording still works, and no new spreadsheet rows appear. Restore access with a new token for the same device ID and verify retry succeeds.
-- [ ] Disconnect and restart. Confirm automatic uploads stop and existing Sheet data remains. Reconnect and verify a failed secure-storage read/write can be recovered in a development build without losing journal data.
-- [ ] Drain a large initial history queue, reopen, and inspect native storage size and responsiveness. Verify reclamation does not lose local workouts or requeue acknowledged rows.
-- [ ] Replace a test phone by restoring its JSON backup before connecting under the same device ID. Verify history and subsequent edits; the Sheet does not download data into a fresh installation. Stop the old installation from uploading under that ID.
+- [ ] Confirm the owner has enabled password Authentication, deployed the supplied upload-only rules, and issued two separate private codes. Inspect records through the owner's Firebase Console.
+- [ ] Before connecting, verify the app works offline and presents no Google or Firebase account sign-in screen.
+- [ ] Open Settings > Database uploads. Confirm the profile/full-history explanation and explicit consent are required with a phone label and private code.
+- [ ] Connect the first phone. Verify its installation binding and distinct device/generation namespace in the owner console. Check supplied age, gender, height, units, plans, schedule snapshots, workouts, and sets.
+- [ ] Confirm all client record reads and lists are denied. The app must not fetch, merge, or restore cloud history.
+- [ ] Interrupt initial upload, restart, and resume. Verify the frozen retry is identical, acknowledgments clear only the confirmed revisions, and Initial history uploaded appears only after all history drains and the completion marker commits.
+- [ ] Go offline, make rapid edits, and confirm local Saved while uploads remain pending. Force-close, reopen, reconnect, and verify the newest drafts upload with blank strings distinct from zero.
+- [ ] Edit a finished set and inspect its existing workout/exercise documents. Remove a local record and verify a revisioned tombstone with an empty payload replaces its cloud content.
+- [ ] Rename an exercise or alter a plan and verify recorded sessions and historical schedule snapshots retain the old definitions and targets.
+- [ ] Rename the phone label and verify only its profile changes while historical identity remains stable.
+- [ ] Connect the second phone with its different code. Verify independent local journals and cloud namespaces, including records with matching source IDs.
+- [ ] Background and reopen during upload. Verify pending data remains and retries in the next active session; no immediate background upload is assumed.
+- [ ] Reach a test upload-budget limit. Confirm Uploads paused and the next attempt are visible, retries do not bypass the cap, and local recording continues. Verify resume across Pacific midnight.
+- [ ] Test invalid and revoked codes. Confirm errors, working local recording, and no unauthorized cloud writes. Test owner-issued credential rotation without losing the installation binding, revision clock, or frozen batch.
+- [ ] Disconnect and restart. Confirm uploads stop and existing cloud data remains. Reconnect after offline edits/deletions and verify their latest state uploads.
+- [ ] Test failed secure-storage reads/writes and a restart during enrollment in a development build; recover without losing journal data or accidentally activating another identity.
+- [ ] Drain a large initial history queue, reopen, and inspect native storage size/responsiveness. Verify maintenance preserves workouts and does not requeue acknowledged records.
+- [ ] Replace a test phone with an owner-issued fresh generation. Restore its JSON backup before connecting; verify the old generation is preserved and an old code cannot bind the new installation. The app must not restore from Firestore.
+
 ## Backup and update recovery
 
-- [ ] Export through the share sheet to Files outside the app's storage.
+- [ ] Export through the share sheet to Files outside the app's storage, including the pre-migration backup when available.
 - [ ] Make a harmless edit, restore the backup with confirmation, and verify plans, revisions, profile, sessions, fractions, and unfinished drafts.
 - [ ] Cancel file selection and replacement confirmation; current data stays unchanged.
 - [ ] Try malformed JSON and an unsupported schema version; show an error and preserve current data.
-- [ ] Install a newer preview build over the app with the same identifier; verify all existing history remains after the original single-row database migrates to individual session records.
+- [ ] Install a newer preview build over the app with the same identifier; verify all existing history remains when the database migrates to SQLite schema version 5. Confirm the automatic private pre-migration JSON copy is created before migration and can be shared with Export pre-migration backup.
 - [ ] Record installed app and Documents & Data sizes in iPhone Storage before and after adding representative history. Check recording and chart responsiveness on the actual phone.
 - [ ] If using a second phone, verify it has separate data and works offline.
 
 Open issues / screenshots / results:
+
+## Recommendations, recurrence, and body-weight acceptance
+
+- [ ] Home + and Manage plans open the same plan list; create, edit, cancel/discard, archive, and failed-save retry return correctly.
+- [ ] A lone Every 2 weeks plan keeps its rest week; opposite-week plans share a day; conflicts show inline without modifying other plans.
+- [ ] Existing irregular schedules keep their dates while editing names/exercises; selecting a new frequency changes dates only from today.
+- [ ] Record 40 lb × 12 and 80 lb × 10 for an 8–12 target; the next session suggests 75 lb at a 5 lb increment, with an explanation.
+- [ ] Warm-up labels persist and exclude those sets from progression/working-set totals. No effort input is required.
+- [ ] Check two-workout increases and reductions, unit changes, historical dates, skipped sets, and long gaps.
+- [ ] Add/edit/delete dated body weights in Settings and Analytics; units preserve canonical kg; ratios use a measurement on or before each workout.
+- [ ] Read estimated-strength charts, all-time records, volume, empty states, and dated body-weight ratios with large text and both themes.
+- [ ] Export/import JSON v2 and import v1; verify raw versioned recovery exports, original results/suggestions, and pending cloud uploads survive migration/restart.

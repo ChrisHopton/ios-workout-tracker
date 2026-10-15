@@ -1,194 +1,384 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  createSyncTransport,
-  requestSync,
-  SyncError,
-  type TransportOptions,
+  createSyncTransport, makeCommitBody, nextPacificReset, requestSync,
+  SyncError, validateResponse, type SyncRequest, type TransportOptions,
 } from "../src/sync/transport";
-import {
-  makeBatch,
-  makeRowKey,
-  type RowChange,
-  type SyncCredentials,
-  type SyncRequest,
-} from "../src/sync/protocol";
-import * as previewSecrets from "../src/sync/credentials.web";
+import { makeDocumentKey, type DocumentChange, type SyncCredentials } from "../src/sync/protocol";
+import * as secrets from "../src/sync/credentials.web";
 
 const DEVICE = "11111111-1111-4111-8111-111111111111";
+const GENERATION = "22222222-2222-4222-8222-222222222222";
+const INSTALLATION = "33333333-3333-4333-8333-333333333333";
 const CREDENTIALS: SyncCredentials = {
-  version: 1,
-  endpoint: "https://script.google.com/macros/s/test_deployment/exec",
-  deviceId: DEVICE,
-  token: "a".repeat(64),
+  version: 1, projectId: "workout-test", apiKey: "a".repeat(39), deviceId: DEVICE,
+  generationId: GENERATION, uid: "phone_one", email: "phone@example.com",
+  password: "private-test-password",
 };
-const ROW: RowChange = {
-  table: "People",
-  key: makeRowKey("People", DEVICE, "profile"),
-  values: ["Phone", 30, "Unspecified", 175, "lb"],
-  revision: 1,
-  deleted: false,
+const CHANGE: DocumentChange = {
+  key: makeDocumentKey("workout", DEVICE, "session"), kind: "workout",
+  payload: { title: "Workout", exercises: [] }, revision: 1, deleted: false,
 };
-const REQUEST = makeBatch(CREDENTIALS, [ROW]);
-
-function reply(request = REQUEST) {
+const REQUEST: SyncRequest = { action: "upload", installationId: INSTALLATION, changes: [CHANGE] };
+const STAMP = "2026-10-13T12:00:00.000Z";
+function authResponse(overrides: Record<string, unknown> = {}) {
   return {
-    version: 1, ok: true, deviceId: DEVICE, maxRevision: 9,
-    acknowledged: (request.changes ?? []).map(({ key, revision }) => ({ key, revision })),
+    idToken: "id-token", refreshToken: "refresh-token", expiresIn: "3600",
+    localId: CREDENTIALS.uid, email: CREDENTIALS.email, registered: true, ...overrides,
   };
 }
-
+function refreshResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    id_token: "refreshed-id-token", refresh_token: "rotated-refresh-token",
+    expires_in: "3600", user_id: CREDENTIALS.uid, token_type: "Bearer",
+    project_id: "1234567890", ...overrides,
+  };
+}
+function commitResponse(count = 1) {
+  return { writeResults: Array.from({ length: count }, () => ({ updateTime: STAMP })), commitTime: STAMP };
+}
 function fetcher(callback: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) {
   return callback as typeof fetch;
 }
+async function settle() { for (let index = 0; index < 40; index++) await Promise.resolve(); }
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
-test("POST follows the Apps Script redirect and validates the complete acknowledgement", async () => {
+test("signs in silently then only POSTs an atomic Commit with complete document envelopes", async () => {
+  const calls: { url: string; init: RequestInit }[] = [];
   const transport = createSyncTransport(fetcher(async (input, init) => {
-    assert.equal(input, CREDENTIALS.endpoint);
-    assert.equal(init?.method, "POST");
-    assert.equal(init?.redirect, "follow");
-    assert.equal(init?.headers && (init.headers as Record<string, string>)["Content-Type"], "application/json");
-    assert.deepEqual(JSON.parse(init!.body as string), REQUEST);
-    assert.ok(init?.signal instanceof AbortSignal);
-    return Response.json(reply());
+    calls.push({ url: String(input), init: init! });
+    return Response.json(calls.length === 1 ? authResponse() : commitResponse());
   }));
-  assert.deepEqual(await transport(REQUEST, CREDENTIALS), reply());
+  assert.deepEqual(await transport(REQUEST, CREDENTIALS), {
+    acknowledged: [{ key: CHANGE.key, revision: 1 }],
+  });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${CREDENTIALS.apiKey}`);
+  assert.deepEqual(JSON.parse(calls[0].init.body as string), {
+    email: CREDENTIALS.email, password: CREDENTIALS.password, returnSecureToken: true,
+  });
+  assert.equal(calls[1].url, "https://firestore.googleapis.com/v1/projects/workout-test/databases/(default)/documents:commit");
+  assert.equal((calls[1].init.headers as Record<string, string>).Authorization, "Bearer id-token");
+  const body = JSON.parse(calls[1].init.body as string);
+  assert.deepEqual(Object.keys(body), ["writes"]);
+  assert.deepEqual(Object.keys(body.writes[0]), ["update"]);
+  assert.ok(body.writes[0].update.name.includes(`devices/${DEVICE}/generations/${GENERATION}/records/`));
+  assert.equal(body.writes[0].update.fields.installationId.stringValue, INSTALLATION);
+  assert.equal(body.writes[0].update.fields.revision.integerValue, "1");
+  assert.ok(!(calls[1].init.body as string).includes(CREDENTIALS.password));
+  assert.ok(!(calls[1].init.body as string).includes(CREDENTIALS.uid));
+  assert.ok(calls.every(({ init }) => init.method === "POST" && init.redirect === "error"));
 });
 
-test("timeout aborts a request even when fetch never settles", async () => {
-  let timeout!: () => void;
-  let cancelled = false;
-  let signal!: AbortSignal;
-  const options: TransportOptions = {
-    setTimeout: (callback, delay) => {
-      assert.equal(delay, 20_000);
-      timeout = callback;
-      return 7;
+test("loads a refresh token, verifies its UID, persists rotation, and caches only the ID token in memory", async () => {
+  const urls: string[] = [];
+  const saved: string[] = [];
+  const transport = createSyncTransport(fetcher(async (input, init) => {
+    urls.push(String(input));
+    if (urls.length === 1) {
+      assert.equal(init?.body, "grant_type=refresh_token&refresh_token=old%2Btoken");
+      return Response.json(refreshResponse());
+    }
+    assert.equal((init!.headers as Record<string, string>).Authorization, "Bearer refreshed-id-token");
+    return Response.json(commitResponse());
+  }), {
+    loadRefreshToken: async () => "old+token",
+    saveRefreshToken: async (credentials, token) => {
+      assert.deepEqual(credentials, CREDENTIALS); saved.push(token);
     },
-    clearTimeout: (handle) => { assert.equal(handle, 7); cancelled = true; },
+  });
+  await transport(REQUEST, CREDENTIALS);
+  await transport(REQUEST, CREDENTIALS);
+  assert.equal(urls.filter((url) => url.includes("securetoken.googleapis.com")).length, 1);
+  assert.ok(urls.every((url) => !url.includes("signInWithPassword")));
+  assert.deepEqual(saved, ["rotated-refresh-token", "rotated-refresh-token"]);
+});
+
+test("refreshes expiring ID tokens and retries an invalid refresh token using the provisioned password", async () => {
+  let now = Date.UTC(2026, 9, 13, 12);
+  const urls: string[] = [];
+  const transport = createSyncTransport(fetcher(async (input) => {
+    const url = String(input);
+    urls.push(url);
+    if (url.includes("signInWithPassword")) return Response.json(authResponse());
+    if (url.includes("securetoken.googleapis.com")) return Response.json(refreshResponse());
+    return Response.json(commitResponse());
+  }), { now: () => now });
+  await transport(REQUEST, CREDENTIALS);
+  now += 3_540_000;
+  await transport(REQUEST, CREDENTIALS);
+  assert.equal(urls.filter((url) => url.includes("signInWithPassword")).length, 1);
+  assert.equal(urls.filter((url) => url.includes("securetoken.googleapis.com")).length, 1);
+  const fallback: string[] = [];
+  const expired = createSyncTransport(fetcher(async (input) => {
+    fallback.push(String(input));
+    if (fallback.length === 1) return Response.json({ error: { message: "INVALID_REFRESH_TOKEN" } }, { status: 400 });
+    return Response.json(fallback.length === 2 ? authResponse() : commitResponse());
+  }), { loadRefreshToken: async () => "invalid-refresh" });
+  await expired(REQUEST, CREDENTIALS);
+  assert.ok(fallback[1].includes("signInWithPassword"));
+});
+
+test("disabled users and mismatched Auth UIDs never reach Firestore", async () => {
+  for (const value of [authResponse({ localId: "wrong_uid" }), authResponse({ expiresIn: "NaN" }), authResponse({ idToken: "bad\ntoken" })]) {
+    let calls = 0;
+    const transport = createSyncTransport(fetcher(async () => { calls++; return Response.json(value); }));
+    await assert.rejects(transport(REQUEST, CREDENTIALS), (error: unknown) => error instanceof SyncError && !error.retryable);
+    assert.equal(calls, 1);
+  }
+  let calls = 0;
+  const disabled = createSyncTransport(fetcher(async () => {
+    calls++;
+    return Response.json({ error: { message: "USER_DISABLED" } }, { status: 400 });
+  }), { loadRefreshToken: async () => "old-refresh" });
+  await assert.rejects(disabled(REQUEST, CREDENTIALS), (error: unknown) => error instanceof SyncError && error.kind === "auth");
+  assert.equal(calls, 1);
+  const wrongRefresh = createSyncTransport(fetcher(async () =>
+    Response.json(refreshResponse({ user_id: "wrong_uid" }))), { loadRefreshToken: async () => "old-refresh" });
+  await assert.rejects(wrongRefresh(REQUEST, CREDENTIALS), /could not be verified/);
+});
+
+test("an expired cached authorization causes a separately budgeted retry instead of an internal Commit retry", async () => {
+  let commits = 0;
+  let refreshes = 0;
+  const transport = createSyncTransport(fetcher(async (input) => {
+    const url = String(input);
+    if (url.includes("signInWithPassword")) return Response.json(authResponse());
+    if (url.includes("securetoken.googleapis.com")) { refreshes++; return Response.json(refreshResponse()); }
+    commits++;
+    return commits === 2
+      ? Response.json({ error: { status: "UNAUTHENTICATED" } }, { status: 401 })
+      : Response.json(commitResponse());
+  }));
+  await transport(REQUEST, CREDENTIALS);
+  await assert.rejects(transport(REQUEST, CREDENTIALS), (error: unknown) => error instanceof SyncError && error.retryable);
+  assert.equal(commits, 2);
+  await transport(REQUEST, CREDENTIALS);
+  assert.equal(commits, 3);
+  assert.equal(refreshes, 1);
+});
+
+test("timeout aborts stalled Auth requests and stalled Commit response bodies", async () => {
+  let timeout!: () => void;
+  let signal!: AbortSignal;
+  let cancelled = 0;
+  const options: TransportOptions = {
+    setTimeout: (callback, delay) => { assert.equal(delay, 20_000); timeout = callback; return 1; },
+    clearTimeout: () => { cancelled++; },
   };
-  const transport = createSyncTransport(fetcher(async (_, init) => {
+  const stalled = createSyncTransport(fetcher(async (_, init) => {
     signal = init!.signal!;
     return new Promise<Response>(() => undefined);
   }), options);
-  const request = transport(REQUEST, CREDENTIALS);
+  const request = stalled(REQUEST, CREDENTIALS);
+  await settle();
   timeout();
-  await assert.rejects(request, (error: unknown) =>
-    error instanceof SyncError && error.retryable && /timed out/.test(error.message));
+  await assert.rejects(request, (error: unknown) => error instanceof SyncError && error.retryable && /timed out/.test(error.message));
   assert.equal(signal.aborted, true);
-  assert.equal(cancelled, true);
-});
-
-test("the twenty second timeout also covers a stalled response body", async () => {
-  let timeout!: () => void;
-  const transport = createSyncTransport(fetcher(async () => ({
-    ok: true,
-    json: () => new Promise(() => undefined),
-  }) as Response), {
-    setTimeout: (callback) => { timeout = callback; return 1; },
-    clearTimeout: () => undefined,
-  });
-  const request = transport(REQUEST, CREDENTIALS);
-  await Promise.resolve();
-  timeout();
-  await assert.rejects(request, /timed out/);
-});
-
-test("non-JSON HTTP 200 responses and malformed response shapes are rejected", async () => {
-  const invalid = [
-    { ...reply(), version: 2 },
-    { ...reply(), deviceId: "22222222-2222-4222-8222-222222222222" },
-    { ...reply(), acknowledged: [] },
-    { ...reply(), acknowledged: [{ key: ROW.key, revision: 2 }] },
-    { ...reply(), acknowledged: [{ key: ROW.key, revision: 1 }, { key: ROW.key, revision: 1 }] },
-    { ...reply(), maxRevision: -1 },
-    { ...reply(), token: CREDENTIALS.token },
-  ];
-  for (const value of invalid) {
-    const transport = createSyncTransport(fetcher(async () => Response.json(value)));
-    await assert.rejects(transport(REQUEST, CREDENTIALS), (error: unknown) =>
-      error instanceof SyncError && !error.retryable && /invalid response/.test(error.message));
-  }
-  const html = createSyncTransport(fetcher(async () => new Response("<html>Sign in</html>")));
-  await assert.rejects(html(REQUEST, CREDENTIALS), /invalid response/);
-});
-
-test("HTTP authentication errors stop retries while rate limits and server failures can retry", async () => {
-  for (const [status, retryable] of [[403, false], [400, false], [429, true], [408, true], [503, true]] as const) {
-    const transport = createSyncTransport(fetcher(async () => new Response("", { status })));
-    await assert.rejects(transport(REQUEST, CREDENTIALS), (error: unknown) =>
-      error instanceof SyncError && error.retryable === retryable);
-  }
-});
-
-test("failure responses and raw network exceptions never expose endpoint or token text", async () => {
-  const transport = createSyncTransport(fetcher(async () =>
-    Response.json({ version: 1, ok: false, error: CREDENTIALS.token, retryable: false })));
-  const response = await transport(REQUEST, CREDENTIALS);
-  assert.equal(response.ok, false);
-  if (!response.ok) {
-    assert.ok(!response.error.includes(CREDENTIALS.token));
-    assert.equal(response.retryable, false);
-  }
-  const offline = createSyncTransport(fetcher(async () => {
-    throw new Error(`${CREDENTIALS.endpoint} ${CREDENTIALS.token}`);
-  }));
-  await assert.rejects(offline(REQUEST, CREDENTIALS), (error: unknown) =>
-    error instanceof SyncError && error.retryable &&
-    !error.message.includes(CREDENTIALS.token) &&
-    !error.message.includes(CREDENTIALS.endpoint));
-});
-
-test("request validation refuses invalid credentials and oversized requests before fetching", async () => {
+  assert.equal(cancelled, 1);
   let calls = 0;
-  const transport = createSyncTransport(fetcher(async () => { calls++; return Response.json(reply()); }));
-  const invalidRequests = [
-    { ...REQUEST, token: "b".repeat(64) },
-    { ...REQUEST, version: 2 },
-    { ...REQUEST, extra: true },
-    { ...REQUEST, changes: [ROW, ROW] },
-    { ...REQUEST, changes: [{ ...ROW, revision: 0 }] },
-    { version: 1, action: "hello", deviceId: DEVICE, token: CREDENTIALS.token, changes: [] },
-    { ...REQUEST, changes: Array.from({ length: 101 }, (_, index) =>
-      ({ ...ROW, key: makeRowKey("People", DEVICE, index) })) },
-    { ...REQUEST, changes: Array.from({ length: 20 }, (_, index) => ({
-      ...ROW, key: makeRowKey("People", DEVICE, index),
-      values: ["x".repeat(14_000), 30, "Unspecified", 175, "lb"],
-    })) },
+  const body = createSyncTransport(fetcher(async () => {
+    calls++;
+    return calls === 1 ? Response.json(authResponse()) : {
+      status: 200, json: () => new Promise(() => undefined),
+    } as Response;
+  }), options);
+  const bodyRequest = body(REQUEST, CREDENTIALS);
+  await settle();
+  timeout();
+  await assert.rejects(bodyRequest, /timed out/);
+});
+
+test("backgrounding while Auth is pending prevents the subsequent Firestore Commit", async () => {
+  const gate = deferred<Response>();
+  let active = true;
+  let calls = 0;
+  const transport = createSyncTransport(fetcher(async () => { calls++; return gate.promise; }));
+  const request = transport(REQUEST, CREDENTIALS, () => active);
+  await settle();
+  active = false;
+  gate.resolve(Response.json(authResponse()));
+  await assert.rejects(request, /paused while/);
+  assert.equal(calls, 1);
+});
+
+test("binding writes an immutable nonce manifest and validates exactly one write result", async () => {
+  const bind: SyncRequest = { action: "bind", installationId: INSTALLATION };
+  const body = JSON.parse(makeCommitBody(bind, CREDENTIALS));
+  assert.equal(body.writes.length, 1);
+  assert.deepEqual(body.writes[0].update.fields, {
+    schemaVersion: { integerValue: "1" }, deviceId: { stringValue: DEVICE },
+    generationId: { stringValue: GENERATION }, installationId: { stringValue: INSTALLATION },
+  });
+  assert.ok(!body.writes[0].update.name.includes("/records/"));
+  const transport = createSyncTransport(fetcher(async (input) => Response.json(
+    String(input).includes("signInWithPassword") ? authResponse() : commitResponse(),
+  )));
+  assert.deepEqual(await transport(bind, CREDENTIALS), { acknowledged: [] });
+});
+
+test("malformed HTTP 200 receipts acknowledge nothing including invalid times and transforms", async () => {
+  const invalid = [
+    {}, { ...commitResponse(), writeResults: [] },
+    { ...commitResponse(), writeResults: [{ updateTime: STAMP }, { updateTime: STAMP }] },
+    { ...commitResponse(), commitTime: "2026-02-30T12:00:00Z" },
+    { ...commitResponse(), commitTime: "yesterday" },
+    { ...commitResponse(), writeResults: [{ updateTime: "2026-10-14T12:00:00Z" }] },
+    { ...commitResponse(), writeResults: [{ updateTime: STAMP, transformResults: [] }] },
+    { ...commitResponse(), extra: true },
   ];
-  for (const request of invalidRequests) {
-    await assert.rejects(transport(request as SyncRequest, CREDENTIALS), /pending sync data is invalid/);
+  for (const receipt of invalid) {
+    const transport = createSyncTransport(fetcher(async (input) => Response.json(
+      String(input).includes("signInWithPassword") ? authResponse() : receipt,
+    )));
+    await assert.rejects(transport(REQUEST, CREDENTIALS), (error: unknown) =>
+      error instanceof SyncError && !error.retryable && error.kind === "invalid");
   }
-  await assert.rejects(transport(REQUEST, {
-    ...CREDENTIALS, endpoint: "https://example.com/steal",
-  }), /pending sync data is invalid/);
+  const html = createSyncTransport(fetcher(async (input) =>
+    String(input).includes("signInWithPassword") ? Response.json(authResponse()) : new Response("<html>Sign in</html>")));
+  await assert.rejects(html(REQUEST, CREDENTIALS), /could not be verified/);
+});
+
+test("HTTP errors are sanitized and distinguish quota, authorization, and temporary service failure", async () => {
+  for (const [status, kind, retryable] of [
+    [403, "auth", false], [400, "auth", false], [429, "quota", true], [503, "network", true],
+  ] as const) {
+    const transport = createSyncTransport(fetcher(async (input) =>
+      String(input).includes("signInWithPassword")
+        ? Response.json(authResponse())
+        : new Response(CREDENTIALS.password, { status })),
+      { now: () => Date.UTC(2026, 9, 13, 12) });
+    await assert.rejects(transport(REQUEST, CREDENTIALS), (error: unknown) =>
+      error instanceof SyncError && error.kind === kind && error.retryable === retryable &&
+      !error.message.includes(CREDENTIALS.password) &&
+      (kind !== "quota" || error.retryAt! > Date.UTC(2026, 9, 13, 12)));
+  }
+  const offline = createSyncTransport(fetcher(async () => { throw new Error(CREDENTIALS.password); }));
+  await assert.rejects(offline(REQUEST, CREDENTIALS), (error: unknown) =>
+    error instanceof SyncError && error.retryable && !error.message.includes(CREDENTIALS.password));
+});
+
+test("invalid or oversized requests fail before Auth or Firestore network calls", async () => {
+  let calls = 0;
+  const transport = createSyncTransport(fetcher(async () => { calls++; return Response.json(authResponse()); }));
+  const requests = [
+    { ...REQUEST, installationId: "invalid" },
+    { ...REQUEST, extra: true },
+    { ...REQUEST, changes: [] },
+    { ...REQUEST, changes: [CHANGE, CHANGE] },
+    { ...REQUEST, changes: [{ ...CHANGE, revision: 0 }] },
+    { ...REQUEST, changes: Array.from({ length: 11 }, (_, index) => ({
+      ...CHANGE, key: makeDocumentKey("workout", DEVICE, index),
+    })) },
+    { ...REQUEST, changes: Array.from({ length: 10 }, (_, index) => ({
+      ...CHANGE, key: makeDocumentKey("workout", DEVICE, index), payload: { content: "x".repeat(50_000) },
+    })) },
+    { action: "bind", installationId: INSTALLATION, changes: [] },
+  ];
+  for (const request of requests) {
+    await assert.rejects(transport(request as SyncRequest, CREDENTIALS), /invalid/);
+  }
+  await assert.rejects(transport(REQUEST, { ...CREDENTIALS, projectId: "../other-project" }), /invalid/);
   assert.equal(calls, 0);
 });
 
-test("hello accepts only an empty acknowledgement list", async () => {
-  const hello: SyncRequest = {
-    version: 1, action: "hello", deviceId: DEVICE, token: CREDENTIALS.token,
-  };
-  const valid = createSyncTransport(fetcher(async () => Response.json(reply(hello))));
-  assert.equal((await valid(hello, CREDENTIALS)).ok, true);
-  const invalid = createSyncTransport(fetcher(async () => Response.json(reply())));
-  await assert.rejects(invalid(hello, CREDENTIALS), /invalid response/);
+test("receipt mapping requires exact revision order and complete acknowledgements", () => {
+  const other = { ...CHANGE, key: makeDocumentKey("workout", DEVICE, "other") };
+  const request: SyncRequest = { ...REQUEST, changes: [CHANGE, other] };
+  assert.throws(() => validateResponse(request, {
+    acknowledged: [{ key: other.key, revision: 1 }, { key: CHANGE.key, revision: 1 }],
+  }), /could not be verified/);
+  assert.throws(() => validateResponse({ action: "bind", installationId: INSTALLATION }, {
+    acknowledged: [{ key: CHANGE.key, revision: 1 }],
+  }), /could not be verified/);
 });
 
-test("web credentials remain only in memory and real browser transport refuses network calls", async () => {
-  await previewSecrets.removeCredentials();
-  assert.equal(await previewSecrets.loadCredentials(), null);
-  await previewSecrets.saveCredentials(CREDENTIALS);
-  const loaded = await previewSecrets.loadCredentials();
-  assert.deepEqual(loaded, CREDENTIALS);
-  loaded!.token = "b".repeat(64);
-  assert.deepEqual(await previewSecrets.loadCredentials(), CREDENTIALS);
+test("Pacific quota reset handles both daylight saving transitions", () => {
+  assert.equal(new Date(nextPacificReset(Date.parse("2026-03-08T08:00:00Z"))).toISOString(), "2026-03-09T07:00:00.000Z");
+  assert.equal(new Date(nextPacificReset(Date.parse("2026-11-01T07:00:00Z"))).toISOString(), "2026-11-02T08:00:00.000Z");
+});
+
+test("browser credential storage discards stale refreshes and default transport never contacts Firebase", async () => {
+  await secrets.removeCredentials();
+  await secrets.saveCredentials(CREDENTIALS);
+  await secrets.saveRefreshToken(CREDENTIALS, "old-refresh");
+  assert.equal(await secrets.loadRefreshToken(CREDENTIALS), "old-refresh");
+  const rotated = { ...CREDENTIALS, uid: "rotated_uid", email: "rotated@example.com" };
+  await secrets.saveCredentials(rotated);
+  await secrets.saveRefreshToken(CREDENTIALS, "late-refresh");
+  assert.equal(await secrets.loadRefreshToken(rotated), null);
+  await secrets.saveRefreshToken(rotated, "new-refresh");
+  assert.equal(await secrets.loadRefreshToken(rotated), "new-refresh");
   Object.defineProperty(globalThis, "document", { value: {}, configurable: true });
   try {
-    await assert.rejects(requestSync(REQUEST, CREDENTIALS), /iPhone app/);
+    await assert.rejects(requestSync(REQUEST, CREDENTIALS), /Browser preview/);
+    await assert.rejects(createSyncTransport()(REQUEST, CREDENTIALS), /Browser preview/);
   } finally {
     Reflect.deleteProperty(globalThis, "document");
-    await previewSecrets.removeCredentials();
+    await secrets.removeCredentials();
   }
-  assert.equal(await previewSecrets.loadCredentials(), null);
+  await secrets.saveRefreshToken(rotated, "late-after-disconnect");
+  assert.equal(await secrets.loadCredentials(), null);
+  assert.equal(await secrets.loadRefreshToken(rotated), null);
+});
+test("mocked native SecureStore repairs corrupt vault data and removes legacy Sheets credentials", async () => {
+  const [{ readFileSync }, { resolve }, typescript, protocol] = await Promise.all([
+    import("node:fs"), import("node:path"), import("typescript"), import("../src/sync/protocol"),
+  ]);
+  const stored = new Map<string, string>([
+    ["workout.firebase.credentials.v1", "{corrupt private data"],
+    ["workout.sheets.credentials.v1", "legacy-private-secret"],
+  ]);
+  const options: unknown[] = [];
+  const secureStore = {
+    WHEN_UNLOCKED_THIS_DEVICE_ONLY: 7,
+    getItemAsync: async (key: string, option: unknown) => {
+      options.push(option); return stored.get(key) ?? null;
+    },
+    setItemAsync: async (key: string, value: string, option: unknown) => {
+      options.push(option); stored.set(key, value);
+    },
+    deleteItemAsync: async (key: string, option: unknown) => {
+      options.push(option); stored.delete(key);
+    },
+  };
+  const compiler = typescript.default;
+  const source = readFileSync(resolve("src/sync/credentials.ts"), "utf8");
+  const compiled = compiler.transpileModule(source, {
+    compilerOptions: { module: compiler.ModuleKind.CommonJS, target: compiler.ScriptTarget.ES2022 },
+  }).outputText;
+  const exported: Record<string, unknown> = {};
+  const localRequire = (name: string) => {
+    if (name === "expo-secure-store") return secureStore;
+    if (name === "./protocol") return protocol;
+    throw new Error("Unexpected mock dependency");
+  };
+  new Function("exports", "require", compiled)(exported, localRequire);
+  const vault = exported as typeof import("../src/sync/credentials");
+  await assert.rejects(vault.loadCredentials(), (error: unknown) =>
+    error instanceof Error && /could not be read/.test(error.message) && !error.message.includes("private data"));
+  await vault.saveCredentials(CREDENTIALS);
+  assert.deepEqual(await vault.loadCredentials(), CREDENTIALS);
+  assert.equal(stored.has("workout.sheets.credentials.v1"), false);
+  await vault.saveRefreshToken(CREDENTIALS, "first-refresh");
+  assert.equal(await vault.loadRefreshToken(CREDENTIALS), "first-refresh");
+  const rotated = { ...CREDENTIALS, uid: "new_uid", email: "new@example.com" };
+  await Promise.all([
+    vault.saveCredentials(rotated),
+    vault.saveRefreshToken(CREDENTIALS, "stale-refresh"),
+  ]);
+  assert.equal(await vault.loadRefreshToken(rotated), null);
+  assert.deepEqual(await vault.loadCredentials(), rotated);
+  const value = JSON.parse(stored.get("workout.firebase.credentials.v1")!);
+  assert.deepEqual(Object.keys(value), ["credentials", "refreshToken"]);
+  assert.ok(!stored.get("workout.firebase.credentials.v1")!.includes("idToken"));
+  await vault.removeCredentials();
+  await vault.saveRefreshToken(rotated, "late-after-remove");
+  assert.equal(await vault.loadCredentials(), null);
+  assert.ok(options.every((option) =>
+    (option as { keychainAccessible: number }).keychainAccessible === 7));
 });

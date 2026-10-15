@@ -1,8 +1,10 @@
-import { parseBackup } from "../domain/backup";
+import { parseBackup, upgradeData, validateStoredData, type LegacyAppData } from "../domain/backup";
 import { initialData } from "../domain/library";
 import { AppData, WorkoutSession } from "../domain/types";
 import { snapshot } from "./snapshot";
 import { createSyncJournal } from "../sync/journal";
+import type { SyncIdentity } from "../sync/protocol";
+import type { SyncLocalState } from "../sync/controller";
 
 export interface Connection {
   execAsync(sql: string): Promise<void>;
@@ -23,7 +25,7 @@ interface StoredSession {
   position: number;
 }
 
-export function createJournalStorage(db: JournalDatabase) {
+export function createJournalStorage(db: JournalDatabase, options: { beforeMigration?: (data: AppData | LegacyAppData, fromVersion: number, toVersion: number) => Promise<void> } = {}) {
   const sync = createSyncJournal(db);
   let tail: Promise<unknown> = Promise.resolve();
   function serial<T>(operation: () => Promise<T>): Promise<T> {
@@ -82,7 +84,7 @@ export function createJournalStorage(db: JournalDatabase) {
           await tx.runAsync("DELETE FROM workout_sessions WHERE id = ?", id);
         await sync.capture(tx, saved, next);
         if (migrate) await tx.execAsync("DROP TABLE app_state;");
-        await tx.execAsync("PRAGMA user_version = 3;");
+        await tx.execAsync("PRAGMA user_version = 5;");
       });
     }
     // Advance the comparison cache only after the complete transaction succeeds
@@ -91,7 +93,28 @@ export function createJournalStorage(db: JournalDatabase) {
     sessions = nextSessions;
   }
 
+  async function backupBeforeMigration() {
+    if (!options.beforeMigration) return;
+    const version = await db.getFirstAsync<{ user_version: number }>("PRAGMA user_version");
+    if (!version || version.user_version < 1 || version.user_version >= 5) return;
+    const metaExists = await db.getFirstAsync<{ name: string }>("SELECT name FROM sqlite_master WHERE name = 'journal_meta'");
+    if (metaExists) {
+      const meta = await db.getFirstAsync<{ value: string }>("SELECT value FROM journal_meta WHERE id = 1");
+      if (meta) {
+        const rows = await db.getAllAsync<{ value: string }>("SELECT value FROM workout_sessions ORDER BY position");
+        await options.beforeMigration(validateStoredData({ ...JSON.parse(meta.value), sessions: rows.map((row) => JSON.parse(row.value)) }), version.user_version, 5);
+      }
+    } else {
+      const legacy = await db.getFirstAsync<{ name: string }>("SELECT name FROM sqlite_master WHERE name = 'app_state'");
+      if (legacy) {
+        const row = await db.getFirstAsync<{ value: string }>("SELECT value FROM app_state WHERE id = 1");
+        if (row) await options.beforeMigration(validateStoredData(JSON.parse(row.value)), version.user_version, 5);
+      }
+    }
+  }
+
   async function read(): Promise<AppData> {
+    await backupBeforeMigration();
     await sync.initialize();
     await db.execAsync(
       "PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS journal_meta (id INTEGER PRIMARY KEY CHECK (id = 1), value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS workout_sessions (id TEXT PRIMARY KEY, position INTEGER NOT NULL, value TEXT NOT NULL);",
@@ -103,14 +126,15 @@ export function createJournalStorage(db: JournalDatabase) {
       const records = await db.getAllAsync<{ value: string; position: number }>(
         "SELECT value, position FROM workout_sessions ORDER BY position",
       );
-      const next = snapshot({
+      const raw = {
         ...JSON.parse(row.value),
         sessions: records.map((record) => JSON.parse(record.value)),
-      });
-      saved = next;
+      };
+      const next = snapshot(upgradeData(raw));
+      saved = raw as AppData;
       metadata = row.value;
       sessions = new Map(
-        next.sessions.map((session, index) => [
+        raw.sessions.map((session: WorkoutSession, index: number) => [
           session.id,
           {
             session,
@@ -118,7 +142,8 @@ export function createJournalStorage(db: JournalDatabase) {
           },
         ]),
       );
-      await db.execAsync("PRAGMA user_version = 3;");
+      await write(next);
+      await db.execAsync("PRAGMA user_version = 5;");
       return next;
     }
     const legacy = await db.getFirstAsync<{ name: string }>(
@@ -133,7 +158,7 @@ export function createJournalStorage(db: JournalDatabase) {
       await db.execAsync("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");
       return next;
     }
-    await db.execAsync("PRAGMA user_version = 3;");
+    await db.execAsync("PRAGMA user_version = 5;");
     saved = snapshot(initialData());
     return saved;
   }
@@ -147,11 +172,13 @@ export function createJournalStorage(db: JournalDatabase) {
 
   const repository = {
     state: () => serial(() => sync.state()),
-    connect: (deviceId: string, label: string, floor: number) =>
+    pendingEnrollment: () => serial(() => sync.pendingEnrollment()),
+    prepareEnrollment: (identity: SyncIdentity, label: string, installationId: string) =>
+      serial(() => sync.prepareEnrollment(identity, label, installationId)),
+    activateEnrollment: (candidate: SyncLocalState) =>
       serial(async () => {
         if (!saved) await read();
-        await write(saved!);
-        await sync.connect(saved!, deviceId, label, floor);
+        await sync.activateEnrollment(saved!, candidate);
       }),
     disconnect: () => serial(() => sync.disconnect()),
     setLabel: (label: string) =>
@@ -160,10 +187,12 @@ export function createJournalStorage(db: JournalDatabase) {
         await sync.setLabel(saved!, label);
       }),
     pendingCount: () => serial(() => sync.pendingCount()),
-    pending: () => serial(() => sync.pending()),
-    acknowledge: (acks: { key: string; revision: number }[], at: string) =>
-      serial(() => sync.acknowledge(acks, at)),
+    inFlight: () => serial(() => sync.inFlight()),
+    reserveAttempt: (writes: number, at: number) => serial(() => sync.reserveAttempt(writes, at)),
+    acknowledge: (batchId: string, acks: { key: string; revision: number }[], at: string) =>
+      serial(() => sync.acknowledge(batchId, acks, at)),
   };
+
   return {
     load,
     write: (data: AppData) => serial(() => write(data)),

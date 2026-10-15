@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   Keyboard,
   Modal,
   Pressable,
@@ -20,13 +19,18 @@ import {
   useTheme,
 } from "../components/ui";
 import { useApp } from "../data/store";
-import { addDays, formatDate, mondayOf, today } from "../domain/dates";
+import {
+  addDays,
+  dayDifference,
+  formatDate,
+  mondayOf,
+  today,
+} from "../domain/dates";
 import { loadLabel } from "../domain/library";
 import {
   archiveTemplate,
   saveTemplate,
   scheduleForDate,
-  swapWeekday,
 } from "../domain/schedule";
 import {
   AppData,
@@ -36,6 +40,7 @@ import {
   MUSCLE_GROUPS,
   MuscleGroup,
   WEEKDAYS,
+  WorkoutRecurrence,
   WorkoutTemplate,
   newId,
 } from "../domain/types";
@@ -74,7 +79,12 @@ export default function WorkoutEditor() {
         repMax: String(item.repMax),
       })) ?? [],
   );
-  const [swaps, setSwaps] = useState<number[]>([]);
+  const [recurrence, setRecurrence] = useState<WorkoutRecurrence>(
+    initial?.recurrence ?? { kind: "weekly" },
+  );
+  const [confirmation, setConfirmation] = useState<
+    "discard" | "archive" | "unsaved" | null
+  >(null);
   const [picker, setPicker] = useState<"library" | "custom" | null>(null);
   const [query, setQuery] = useState("");
   const [customName, setCustomName] = useState("");
@@ -92,8 +102,7 @@ export default function WorkoutEditor() {
   const busyRef = useRef(false);
   const [dirty, setDirty] = useState(false);
   const date = today();
-  const previewStart =
-    mondayOf(date) === date ? date : addDays(mondayOf(date), 7);
+  const previewStart = mondayOf(date);
   const selectedIds = new Set(exercises.map((item) => item.exerciseId));
   const filtered = data.exercises.filter((item) =>
     `${item.name} ${item.group} ${groupName(item.group)} ${item.equipment}`
@@ -111,6 +120,7 @@ export default function WorkoutEditor() {
         id,
         title: title.trim() || (preview ? "New workout" : ""),
         weekdays: [...weekdays].sort((a, b) => a - b),
+        recurrence,
         archived: false,
         updatedAt: new Date().toISOString(),
         exercises: exercises.map((item) => ({
@@ -121,29 +131,12 @@ export default function WorkoutEditor() {
         })),
       };
     },
-    [id, title, weekdays, exercises],
+    [id, title, weekdays, recurrence, exercises],
   );
   const applyDraft = useCallback(
-    (current: AppData, template: WorkoutTemplate): AppData => {
-      const conflict = template.weekdays.find(
-        (day) =>
-          current.templates.filter(
-            (item) =>
-              item.id !== template.id &&
-              !item.archived &&
-              item.weekdays.includes(day),
-          ).length >= 2,
-      );
-      if (conflict !== undefined)
-        throw new Error(
-          WEEKDAYS[conflict] +
-            " already has two workouts. Choose another day or edit its existing plans.",
-        );
-      let next = saveTemplate(current, template, date);
-      for (const weekday of swaps) next = swapWeekday(next, weekday, date);
-      return next;
-    },
-    [date, swaps],
+    (current: AppData, template: WorkoutTemplate): AppData =>
+      saveTemplate(current, template, date),
+    [date],
   );
   const preview = useMemo(() => {
     try {
@@ -152,45 +145,27 @@ export default function WorkoutEditor() {
       return { data: null, error: errorText(error) };
     }
   }, [data, applyDraft, draftTemplate]);
-  const previewRevision = preview.data?.scheduleRevisions.at(-1);
-  const alternatingDays =
-    previewRevision?.slots
-      .filter((slot) => slot.workoutIds.length === 2)
-      .map((slot) => slot.weekday) ?? [];
-  function weekName(start: string): string {
-    const anchor = previewRevision?.anchorMonday ?? mondayOf(date);
-    const week = Math.round(
-      (Date.parse(`${start}T00:00:00Z`) - Date.parse(`${anchor}T00:00:00Z`)) /
-        604800000,
+  function activeWeek(start: string): boolean {
+    return (
+      recurrence.kind === "biweekly" &&
+      Math.abs(dayDifference(start, recurrence.anchorMonday) / 7) % 2 === 0
     );
-    return ((week % 2) + 2) % 2 === 0 ? "Week A" : "Week B";
   }
   function leave() {
-    if (router.canGoBack()) router.back();
-    else router.replace("/");
+    router.dismissTo("/plans");
   }
   function cancel() {
     if (busyRef.current) return;
     Keyboard.dismiss();
     if (pendingCommit) {
-      Alert.alert(
-        "Changes have not saved",
-        "Please retry saving before leaving this screen. Your changes are still here.",
-      );
+      setConfirmation("unsaved");
       return;
     }
     if (!dirty) {
       leave();
       return;
     }
-    Alert.alert(
-      "Discard workout changes?",
-      "Your unsaved changes to this plan will be discarded. Exercises already added to your library are kept.",
-      [
-        { text: "Keep editing", style: "cancel" },
-        { text: "Discard changes", style: "destructive", onPress: leave },
-      ],
-    );
+    setConfirmation("discard");
   }
   function addExercise(definition: ExerciseDefinition) {
     if (busyRef.current || pendingCommit || selectedIds.has(definition.id))
@@ -285,8 +260,6 @@ export default function WorkoutEditor() {
       const template = draftTemplate();
       update((current) => applyDraft(current, template));
       setPendingCommit("save");
-      // Retry must not apply the same swaps twice
-      setSwaps([]);
       await flush();
       setPendingCommit(null);
       setDirty(false);
@@ -318,20 +291,7 @@ export default function WorkoutEditor() {
     }
   }
   function confirmArchive() {
-    Alert.alert(
-      "Archive this workout?",
-      "It will be removed from your schedule starting today. Previous workout records and schedules are kept.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Archive",
-          style: "destructive",
-          onPress: () => {
-            void archive();
-          },
-        },
-      ],
-    );
+    if (!busyRef.current && !pendingCommit) setConfirmation("archive");
   }
   async function createCustom() {
     if (busyRef.current) return;
@@ -401,7 +361,7 @@ export default function WorkoutEditor() {
       <Screen>
         <SectionTitle>Workout not found</SectionTitle>
         <Txt muted>This plan may have been removed by a restored backup.</Txt>
-        <Button title="Go home" onPress={leave} />
+        <Button title="Back to plans" onPress={leave} />
       </Screen>
     );
 
@@ -409,7 +369,7 @@ export default function WorkoutEditor() {
     <>
       <Stack.Screen
         options={{
-          title: initial ? "Edit workout" : "Create workout",
+          title: initial ? "Edit plan" : "New plan",
           gestureEnabled: false,
           headerBackVisible: false,
           headerLeft: () => (
@@ -433,8 +393,7 @@ export default function WorkoutEditor() {
           {initial ? "Make it your own." : "A plan to come back to."}
         </Txt>
         <Txt muted>
-          Choose your exercises and training days. Your schedule repeats
-          automatically.
+          Choose your exercises, training days, and how often this plan repeats.
         </Txt>
         <Card>
           <Field
@@ -449,31 +408,99 @@ export default function WorkoutEditor() {
             }}
             returnKeyType="done"
           />
-          <Txt bold>Training days</Txt>
+          <Txt bold>Repeat</Txt>
           <View style={styles.chips}>
-            {WEEKDAYS.map((day, index) => (
-              <Chip
-                key={day}
-                label={day}
-                selected={weekdays.includes(index)}
-                onPress={() => {
-                  if (busyRef.current || pendingCommit) return;
-                  setWeekdays((current) =>
-                    current.includes(index)
-                      ? current.filter((value) => value !== index)
-                      : [...current, index],
-                  );
-                  setSwaps([]);
-                  markDirty();
-                }}
-              />
-            ))}
+            <Chip
+              label="Weekly"
+              selected={recurrence.kind === "weekly"}
+              onPress={() => {
+                if (busyRef.current || pendingCommit) return;
+                setRecurrence({ kind: "weekly" });
+                markDirty();
+              }}
+            />
+            <Chip
+              label="Every 2 weeks"
+              selected={recurrence.kind === "biweekly"}
+              onPress={() => {
+                if (busyRef.current || pendingCommit) return;
+                setRecurrence((current) =>
+                  current.kind === "biweekly"
+                    ? current
+                    : { kind: "biweekly", anchorMonday: previewStart },
+                );
+                markDirty();
+              }}
+            />
           </View>
+          {recurrence.kind === "legacy" && (
+            <View style={{ gap: 8 }}>
+              <Txt bold>Existing custom schedule</Txt>
+              <Txt muted style={styles.small}>
+                Your existing dates are kept when you edit the name or exercises.
+                Choose Weekly or Every 2 weeks above before changing the schedule.
+              </Txt>
+            </View>
+          )}
+          {recurrence.kind === "biweekly" && (
+            <View style={{ gap: 10 }}>
+              <Txt bold>Active week</Txt>
+              <View style={styles.chips}>
+                {[0, 1].map((offset) => {
+                  const start = addDays(previewStart, offset * 7);
+                  return (
+                    <Chip
+                      key={start}
+                      label={`${formatDate(start)} – ${formatDate(addDays(start, 6))}`}
+                      selected={activeWeek(start)}
+                      onPress={() => {
+                        if (busyRef.current || pendingCommit) return;
+                        setRecurrence({ kind: "biweekly", anchorMonday: start });
+                        markDirty();
+                      }}
+                    />
+                  );
+                })}
+              </View>
+              <Txt muted style={styles.small}>
+                Train in the selected week, then skip a week. These dates stay fixed
+                even when a workout is missed.
+              </Txt>
+            </View>
+          )}
+          <Txt bold>Training days</Txt>
+          {recurrence.kind === "legacy" ? (
+            <Txt muted>
+              {weekdays.map((day) => WEEKDAYS[day]).join(", ") || "On demand"}
+            </Txt>
+          ) : (
+            <View style={styles.chips}>
+              {WEEKDAYS.map((day, index) => (
+                <Chip
+                  key={day}
+                  label={day}
+                  selected={weekdays.includes(index)}
+                  onPress={() => {
+                    if (busyRef.current || pendingCommit) return;
+                    setWeekdays((current) =>
+                      current.includes(index)
+                        ? current.filter((value) => value !== index)
+                        : [...current, index],
+                    );
+                    markDirty();
+                  }}
+                />
+              ))}
+            </View>
+          )}
           <Txt muted style={styles.small}>
             {weekdays.length
-              ? "One workout on a day repeats weekly. Two alternate between A and B weeks."
+              ? "One workout per day. Plans every two weeks can share a day in opposite weeks."
               : "No days selected: keep this as an on-demand workout."}
           </Txt>
+          {preview.error && exercises.length > 0 && (
+            <Txt style={{ color: colors.danger }}>{preview.error}</Txt>
+          )}
         </Card>
         <Row style={styles.sectionRow}>
           <SectionTitle>Exercises</SectionTitle>
@@ -610,13 +637,13 @@ export default function WorkoutEditor() {
             setCustomError(null);
           }}
         />
-        <SectionTitle>Next two weeks</SectionTitle>
+        <SectionTitle>This week & next</SectionTitle>
         {preview.error ? (
           <Card>
             <Txt style={{ color: colors.danger }}>{preview.error}</Txt>
             <Txt muted>
-              Complete the fields above to preview your schedule. Each day
-              supports up to two alternating workouts.
+              Complete the fields above to preview your schedule. Each date
+              supports one workout.
             </Txt>
           </Card>
         ) : (
@@ -627,26 +654,30 @@ export default function WorkoutEditor() {
                 return (
                   <Card key={start}>
                     <Row style={styles.sectionRow}>
-                      <Txt bold>{weekName(start)}</Txt>
+                      <Txt bold>{week === 0 ? "This week" : "Next week"}</Txt>
                       <Txt muted style={styles.small}>
                         {formatDate(start)}
                       </Txt>
                     </Row>
                     {WEEKDAYS.map((day, index) => {
-                      const workout = scheduleForDate(
-                        preview.data!,
-                        addDays(start, index),
-                      );
+                      const previewDate = addDays(start, index);
+                      const past = previewDate < date;
+                      const workout = scheduleForDate(preview.data!, previewDate);
                       return (
                         <View
                           key={day}
                           style={[
                             styles.previewRow,
-                            { borderBottomColor: colors.border },
+                            {
+                              borderBottomColor: colors.border,
+                              opacity: past ? 0.5 : 1,
+                            },
                           ]}
                         >
                           <Txt muted style={styles.day}>
                             {day}
+                            {"\n"}
+                            {Number(previewDate.slice(-2))}
                           </Txt>
                           <Txt
                             bold={workout?.id === id}
@@ -670,32 +701,6 @@ export default function WorkoutEditor() {
                   </Card>
                 );
               })}
-              {alternatingDays.length > 0 && (
-                <Card>
-                  <Txt bold>Alternate order</Txt>
-                  <Txt muted style={styles.small}>
-                    Swap a day to choose which workout falls on Week A.
-                  </Txt>
-                  <View style={styles.chips}>
-                    {alternatingDays.map((day) => (
-                      <Chip
-                        key={day}
-                        label={`Swap ${WEEKDAYS[day]} A/B`}
-                        selected={swaps.includes(day)}
-                        onPress={() => {
-                          if (busyRef.current || pendingCommit) return;
-                          setSwaps((current) =>
-                            current.includes(day)
-                              ? current.filter((item) => item !== day)
-                              : [...current, day],
-                          );
-                          markDirty();
-                        }}
-                      />
-                    ))}
-                  </View>
-                </Card>
-              )}
             </>
           )
         )}
@@ -718,7 +723,7 @@ export default function WorkoutEditor() {
                 ? "Retry archive"
                 : pendingCommit
                   ? "Retry save"
-                  : "Save workout"
+                  : "Save plan"
           }
           disabled={busy}
           onPress={() => {
@@ -727,7 +732,7 @@ export default function WorkoutEditor() {
         />
         {initial && (
           <Button
-            title="Archive workout"
+            title="Archive plan"
             danger
             secondary
             disabled={busy || !!pendingCommit}
@@ -735,6 +740,50 @@ export default function WorkoutEditor() {
           />
         )}
       </Screen>
+      <Modal
+        visible={confirmation !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmation(null)}
+      >
+        <View style={styles.dialogBackdrop}>
+          <View style={styles.dialog}>
+            <Card>
+              <SectionTitle>
+                {confirmation === "archive"
+                  ? "Archive this plan?"
+                  : confirmation === "unsaved"
+                    ? "Changes have not saved"
+                    : "Discard plan changes?"}
+              </SectionTitle>
+              <Txt muted>
+                {confirmation === "archive"
+                  ? "This plan leaves your schedule starting today. Previous workout records and schedules are kept."
+                  : confirmation === "unsaved"
+                    ? "Please retry saving before leaving. Your changes are still here."
+                    : "Your unsaved plan changes will be discarded. Exercises already added to your library are kept."}
+              </Txt>
+              <Button
+                title={confirmation === "unsaved" ? "Back to editing" : "Keep editing"}
+                secondary
+                onPress={() => setConfirmation(null)}
+              />
+              {confirmation !== "unsaved" && (
+                <Button
+                  title={confirmation === "archive" ? "Archive plan" : "Discard changes"}
+                  danger
+                  onPress={() => {
+                    const action = confirmation;
+                    setConfirmation(null);
+                    if (action === "archive") void archive();
+                    else leave();
+                  }}
+                />
+              )}
+            </Card>
+          </View>
+        </View>
+      </Modal>
       <Modal
         visible={picker !== null}
         animationType="slide"
@@ -955,4 +1004,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   day: { width: 40, fontSize: 13 },
+  dialogBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  dialog: { width: "100%", maxWidth: 520, alignSelf: "center" },
 });

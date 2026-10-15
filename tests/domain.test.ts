@@ -33,6 +33,7 @@ function template(id = "squat", weekdays = [0]): WorkoutTemplate {
       { exerciseId: "exercise-barbell-squat", sets: 3, repMin: 8, repMax: 12 },
     ],
     weekdays,
+    recurrence: { kind: "weekly" },
     archived: false,
     updatedAt: "2025-01-01T12:00:00Z",
   };
@@ -50,6 +51,7 @@ function record(
     exercises: started.session.exercises.map((item) => ({
       ...item,
       sets: item.sets.map((_, i) => ({
+        classification: "working" as const,
         weight: weights[i],
         reps: reps[i],
         status: "completed" as const,
@@ -81,7 +83,8 @@ test("one workout repeats weekly and two alternate without missed-day drift", ()
   let data = saveTemplate(initialData(), template("a"), firstMonday);
   assert.equal(scheduleForDate(data, "2025-01-13")?.id, "a");
   assert.equal(scheduleForDate(data, "2025-01-07"), null);
-  data = saveTemplate(data, template("b"), firstMonday);
+  data = saveTemplate(data, { ...template("a"), recurrence: { kind: "biweekly", anchorMonday: firstMonday } }, firstMonday);
+  data = saveTemplate(data, { ...template("b"), recurrence: { kind: "biweekly", anchorMonday: addDays(firstMonday, 7) } }, firstMonday);
   assert.equal(scheduleForDate(data, firstMonday)?.id, "a");
   assert.equal(scheduleForDate(data, "2025-01-13")?.id, "b");
   assert.equal(scheduleForDate(data, "2025-01-20")?.id, "a");
@@ -90,7 +93,7 @@ test("one workout repeats weekly and two alternate without missed-day drift", ()
   assert.equal(data.scheduleRevisions.length, 1);
   assert.throws(
     () => saveTemplate(data, template("c"), firstMonday),
-    /at most two/,
+    /schedule conflict/,
   );
 });
 
@@ -103,8 +106,10 @@ test("three Monday-Wednesday plans repeat and six alternate by fixed A/B week", 
       scheduleForDate(data, addDays("2025-01-13", index))?.id,
       `a${index}`,
     );
-  for (let index = 0; index < 3; index++)
-    data = saveTemplate(data, template(`b${index}`, [index]), firstMonday);
+  for (let index = 0; index < 3; index++) {
+    data = saveTemplate(data, { ...template(`a${index}`, [index]), recurrence: { kind: "biweekly", anchorMonday: firstMonday } }, firstMonday);
+    data = saveTemplate(data, { ...template(`b${index}`, [index]), recurrence: { kind: "biweekly", anchorMonday: addDays(firstMonday, 7) } }, firstMonday);
+  }
   for (let index = 0; index < 3; index++) {
     assert.equal(
       scheduleForDate(data, addDays(firstMonday, index))?.id,
@@ -118,12 +123,13 @@ test("three Monday-Wednesday plans repeat and six alternate by fixed A/B week", 
 });
 
 test("schedule revisions preserve earlier titles and targets, order and anchor", () => {
-  let data = saveTemplate(initialData(), template("a"), firstMonday);
-  data = saveTemplate(data, template("b"), firstMonday);
+  let data = saveTemplate(initialData(), { ...template("a"), recurrence: { kind: "biweekly", anchorMonday: firstMonday } }, firstMonday);
+  data = saveTemplate(data, { ...template("b"), recurrence: { kind: "biweekly", anchorMonday: addDays(firstMonday, 7) } }, firstMonday);
   data = saveTemplate(
     data,
     {
       ...template("a"),
+      recurrence: { kind: "biweekly", anchorMonday: firstMonday },
       title: "New A",
       exercises: [{ ...template().exercises[0], sets: 4 }],
     },
@@ -165,6 +171,7 @@ test("session starts once per date and snapshots survive definition/template mut
   assert.equal(started.session.exercises[0].target.sets, 3);
   assert.equal(started.session.exercises[0].exercise.name, "Barbell squat");
   assert.deepEqual(started.session.exercises[0].sets[0], {
+    classification: "working",
     weight: "",
     reps: "",
     status: "pending",
@@ -177,6 +184,7 @@ test("finishing requires explicit completed or skipped valid sets and preserves 
   assert.throws(() => finishSession(session, false), /explicitly skip/);
   assert.throws(() => finishSession(session, true), /at least one/);
   session.exercises[0].sets[0] = {
+    classification: "working",
     weight: "100",
     reps: "8",
     status: "completed",
@@ -247,7 +255,7 @@ test("incomplete targets, skipped sets, training gaps and varying weights suppre
   data.sessions[1].exercises[0].sets[1].status = "skipped";
   assert.deepEqual(
     suggestWeights(data, target, definition, "2025-01-20", "lb").weights,
-    [100, null, 100],
+    [100, 100, 100],
   );
   data = record(record(initialData(), firstMonday), "2025-01-13");
   assert.deepEqual(
@@ -265,7 +273,7 @@ test("incomplete targets, skipped sets, training gaps and varying weights suppre
   );
   assert.deepEqual(
     suggestWeights(data, target, definition, "2025-01-20", "lb").weights,
-    [100, 110, 100],
+    [110, 110, 110],
   );
 });
 
@@ -316,7 +324,7 @@ test("unit changes convert history and compare equivalent units without treating
   );
 });
 
-test("different equipment or prescribed targets are not comparable; bodyweight stays reps only", () => {
+test("equipment isolates history and changed targets hold the demonstrated working load", () => {
   const data = record(record(initialData(), firstMonday), "2025-01-13");
   assert.deepEqual(
     suggestWeights(
@@ -336,7 +344,7 @@ test("different equipment or prescribed targets are not comparable; bodyweight s
       "2025-01-20",
       "lb",
     ).weights,
-    [null, null, null],
+    [100, 100, 100],
   );
   assert.deepEqual(
     suggestWeights(
@@ -382,6 +390,7 @@ test("unfinished comparable sessions interrupt an otherwise successful progressi
   let data = record(record(initialData(), firstMonday), "2025-01-13");
   const started = startSession(data, template(), "2025-01-15");
   started.session.exercises[0].sets[0] = {
+    classification: "working",
     weight: "100",
     reps: "12",
     status: "completed",
@@ -395,7 +404,7 @@ test("unfinished comparable sessions interrupt an otherwise successful progressi
       "2025-01-20",
       "lb",
     ).weights,
-    [100, null, null],
+    [100, 100, 100],
   );
   data = record(data, "2025-01-20");
   const suggestion = suggestWeights(
@@ -406,13 +415,13 @@ test("unfinished comparable sessions interrupt an otherwise successful progressi
     "lb",
   );
   assert.deepEqual(suggestion.weights, [100, 100, 100]);
-  assert.match(suggestion.reason, /unfinished/);
+  assert.match(suggestion.reason, /consecutive finished/);
 });
 
 test("domain-produced schedule, draft and completed session roundtrip backup validation", async () => {
   const { parseBackup, serializeBackup } = await import("../src/domain/backup");
-  let data = saveTemplate(initialData(), template("a"), firstMonday);
-  data = saveTemplate(data, template("b"), firstMonday);
+  let data = saveTemplate(initialData(), { ...template("a"), recurrence: { kind: "biweekly", anchorMonday: firstMonday } }, firstMonday);
+  data = saveTemplate(data, { ...template("b"), recurrence: { kind: "biweekly", anchorMonday: addDays(firstMonday, 7) } }, firstMonday);
   data = record(
     data,
     firstMonday,
@@ -422,7 +431,7 @@ test("domain-produced schedule, draft and completed session roundtrip backup val
   );
   data = saveTemplate(
     data,
-    { ...template("a"), title: "Updated title" },
+    { ...template("a"), recurrence: { kind: "biweekly", anchorMonday: firstMonday }, title: "Updated title" },
     "2025-01-14",
   );
   data = swapWeekday(data, 0, "2025-01-14");

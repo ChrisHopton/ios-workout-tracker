@@ -68,18 +68,19 @@ async function main() {
     );
     const optimizedStats = newDb.stats();
     const baselineBytes = pageCount * pageSize;
-    await store.sync.connect(
-      "00000000-0000-4000-8000-000000000001",
-      "Sizing fixture",
-      0,
+    const staged = await store.sync.prepareEnrollment(
+      { projectId: "workout-sizing", deviceId: "00000000-0000-4000-8000-000000000001", generationId: "00000000-0000-4000-8000-000000000002" },
+      "Sizing fixture", "00000000-0000-4000-8000-000000000003",
     );
+    await store.sync.activateEnrollment(staged);
     const initialPending = await store.sync.pendingCount();
     const peakBytes =
       Number(newDb.native.prepare("PRAGMA page_count").get()?.page_count) *
       pageSize;
-    while (await store.sync.pendingCount()) {
-      const batch = await store.sync.pending();
-      await store.sync.acknowledge(batch, "2026-10-13T12:00:00.000Z");
+    for (;;) {
+      const batch = await store.sync.inFlight();
+      if (!batch) break;
+      await store.sync.acknowledge(batch.id, batch.changes, "2026-10-13T12:00:00.000Z");
     }
     const retainedBytes =
       (Number(newDb.native.prepare("PRAGMA page_count").get()?.page_count) -
@@ -96,11 +97,11 @@ async function main() {
       syncTimings.push(performance.now() - start);
     }
     const syncSizing = {
-      initialPendingRows: initialPending,
+      initialPendingDocuments: initialPending,
       baselineBytes,
       peakInitialUploadBytes: peakBytes,
       retainedAllocatedBytesAfterUpload: retainedBytes,
-      editPendingRows: await store.sync.pendingCount(),
+      editPendingDocuments: await store.sync.pendingCount(),
       editWriteBytes: newDb.stats().bytes - syncBefore.bytes,
       editWriteStatements: newDb.stats().writes - syncBefore.writes,
       editMedianMs: median(syncTimings),
