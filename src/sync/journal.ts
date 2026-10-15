@@ -71,9 +71,15 @@ export function createSyncJournal(db: JournalDatabase) {
     });
     initialized = true;
   }
-  async function readState(connection: Connection, table = "upload_state"): Promise<SyncLocalState | null> {
+  async function readState(connection: Connection, table = "upload_state", invalid: "reject" | "ignore" = "reject"): Promise<SyncLocalState | null> {
     const row = await connection.getFirstAsync<{ value: string }>(`SELECT value FROM ${table} WHERE id = 1`);
-    return row ? checkedState(row.value) : null;
+    // Recovery may ignore malformed identities but database failures must abort the transaction
+    try {
+      return row ? checkedState(row.value) : null;
+    } catch (error) {
+      if (invalid === "ignore") return null;
+      throw error;
+    }
   }
   async function storeState(connection: Connection, state: SyncLocalState, table = "upload_state") {
     await connection.runAsync(`INSERT INTO ${table} (id, value) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET value = excluded.value`, JSON.stringify(state));
@@ -98,7 +104,7 @@ export function createSyncJournal(db: JournalDatabase) {
     await storeState(connection, state);
   }
   async function capture(connection: Connection, before: AppData | undefined, after: AppData) {
-    const current = await readState(connection).catch(() => null);
+    const current = await readState(connection, "upload_state", "ignore");
     if (!current?.enabled) return;
     const oldDocs: UploadDocument[] = [];
     const newDocs: UploadDocument[] = [];
@@ -123,8 +129,8 @@ export function createSyncJournal(db: JournalDatabase) {
     await initialize();
     let candidate!: SyncLocalState;
     await db.withExclusiveTransactionAsync(async (tx) => {
-      const current = await readState(tx).catch(() => null);
-      const staged = await readState(tx, "upload_enrollment").catch(() => null);
+      const current = await readState(tx, "upload_state", "ignore");
+      const staged = await readState(tx, "upload_enrollment", "ignore");
       const prior = sameIdentity(current, identity) ? current : sameIdentity(staged, identity) ? staged : null;
       candidate = prior ? { ...prior, label: checkedLabel(label) } : {
         ...identity, installationId, label: checkedLabel(label), clock: 0,
@@ -139,10 +145,10 @@ export function createSyncJournal(db: JournalDatabase) {
   async function activateEnrollment(data: AppData, candidate: SyncLocalState) {
     await initialize();
     await db.withExclusiveTransactionAsync(async (tx) => {
-      const staged = await readState(tx, "upload_enrollment").catch(() => null);
+      const staged = await readState(tx, "upload_enrollment", "ignore");
       if (!staged || JSON.stringify(staged) !== JSON.stringify(candidate))
         throw new Error("The pending database connection changed. Try again.");
-      const current = await readState(tx).catch(() => null);
+      const current = await readState(tx, "upload_state", "ignore");
       const same = sameIdentity(current, candidate);
       const activated = { ...(same ? current! : candidate), label: candidate.label, bound: true, enabled: true };
       if (!same) {
@@ -164,14 +170,15 @@ export function createSyncJournal(db: JournalDatabase) {
   async function disconnect() {
     await initialize();
     await db.withExclusiveTransactionAsync(async (tx) => {
-      const current = await readState(tx).catch(() => null);
+      const current = await readState(tx, "upload_state", "ignore");
       if (current) await storeState(tx, { ...current, enabled: false });
+      await tx.runAsync("DELETE FROM upload_enrollment");
     });
   }
   async function setLabel(data: AppData, label: string) {
     await initialize();
     await db.withExclusiveTransactionAsync(async (tx) => {
-      const current = await readState(tx).catch(() => null);
+      const current = await readState(tx, "upload_state", "ignore");
       if (!current) throw new Error("Connect the database first.");
       current.label = checkedLabel(label);
       await storeState(tx, current);
@@ -188,7 +195,7 @@ export function createSyncJournal(db: JournalDatabase) {
     await db.withExclusiveTransactionAsync(async (tx) => {
       const frozen = await tx.getFirstAsync<{ value: string }>("SELECT value FROM upload_inflight WHERE id = 1");
       if (frozen) { batch = JSON.parse(frozen.value) as UploadBatch; return; }
-      const current = await readState(tx).catch(() => null);
+      const current = await readState(tx, "upload_state", "ignore");
       if (!current?.enabled || !current.bound) return;
       let rows = await tx.getAllAsync<StoredQueue>("SELECT * FROM upload_outbox ORDER BY revision, key LIMIT 10");
       if (!rows.length && !current.initialComplete) {
@@ -233,7 +240,7 @@ export function createSyncJournal(db: JournalDatabase) {
       if (batch.id !== batchId) return;
       if (acks.length !== batch.changes.length || acks.some((ack, i) => ack.key !== batch.changes[i].key || ack.revision !== batch.changes[i].revision))
         throw new Error("The upload confirmation is invalid.");
-      const current = await readState(tx).catch(() => null);
+      const current = await readState(tx, "upload_state", "ignore");
       if (!current) return;
       for (const doc of batch.changes) {
         if (doc.deleted)

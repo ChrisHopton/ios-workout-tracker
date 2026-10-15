@@ -93,12 +93,12 @@ function measurementForDate(entries: BodyWeightEntry[], date: string): BodyWeigh
 
 export function nextWorkoutSuggestion(data: AppData, date: string, unit: Unit): NextWorkoutSuggestion | null {
   parseDate(date);
-  const completed = new Set(data.sessions.filter((session) => session.status === "completed")
-    .map((session) => session.date + ":" + session.templateId));
+  // A recorded date is occupied even if its plan changed or it is still in progress.
+  const occupiedDates = new Set(data.sessions.map((session) => session.date));
   for (let offset = 0; offset <= 14; offset++) {
     const candidateDate = addDays(date, offset);
     const plan = scheduleForDate(data, candidateDate);
-    if (!plan || completed.has(candidateDate + ":" + plan.id)) continue;
+    if (!plan || occupiedDates.has(candidateDate)) continue;
     return {
       date: candidateDate,
       templateId: plan.id,

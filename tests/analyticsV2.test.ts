@@ -180,3 +180,37 @@ test("personal records include earlier workouts but exclude future and warm-up r
   assert.deepEqual(history.personalRecords.heaviestSet, { date: "2024-01-01", weight: 150, reps: 2 });
   assert.deepEqual(history.personalRecords.repRecord, { date: "2024-01-01", weight: 100, reps: 20 });
 });
+
+for (const status of ["completed", "in_progress"] as const) {
+  for (const templateId of ["strength", "previous-plan"]) {
+    test(`next planned workout skips today occupied by a ${status} session from ${templateId}`, () => {
+      let data = initialData();
+      const plan: WorkoutTemplate = {
+        id: "strength", title: "Strength",
+        exercises: [{ exerciseId: data.exercises[0].id, sets: 2, repMin: 8, repMax: 12 }],
+        weekdays: [0], recurrence: { kind: "weekly" }, archived: false,
+        updatedAt: "2025-01-01T12:00:00Z",
+      };
+      data = saveTemplate(data, plan, "2025-01-06");
+      const current = session(data, "2025-01-13", [set("40", "12"), set("80", "10")]);
+      data.sessions = [{ ...current, templateId, status, finishedAt: status === "completed" ? current.finishedAt : null }];
+      const original = structuredClone(data);
+      const next = nextWorkoutSuggestion(data, "2025-01-13", "kg")!;
+      assert.equal(next.date, "2025-01-20");
+      assert.equal(next.templateId, "strength");
+      assert.deepEqual(data, original);
+    });
+  }
+}
+
+test("next planned workout still offers today's unrecorded plan", () => {
+  let data = initialData();
+  const plan: WorkoutTemplate = {
+    id: "strength", title: "Strength",
+    exercises: [{ exerciseId: data.exercises[0].id, sets: 2, repMin: 8, repMax: 12 }],
+    weekdays: [0], recurrence: { kind: "weekly" }, archived: false,
+    updatedAt: "2025-01-01T12:00:00Z",
+  };
+  data = saveTemplate(data, plan, "2025-01-06");
+  assert.equal(nextWorkoutSuggestion(data, "2025-01-13", "kg")?.date, "2025-01-13");
+});

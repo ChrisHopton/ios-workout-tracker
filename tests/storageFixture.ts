@@ -113,3 +113,22 @@ export function sqliteHarness() {
     close: () => native.close(),
   };
 }
+
+export function scheduleHistoryFixture(revisions: number, workouts = 1000): AppData {
+  const data = historyFixture(workouts);
+  data.templates = Array.from({ length: 7 }, (_, day) => ({
+    id: "plan-" + day, title: "Plan " + day,
+    recurrence: { kind: "weekly" as const }, weekdays: [day], archived: false,
+    updatedAt: "2020-01-01T12:00:00.000Z",
+    exercises: data.exercises.slice(0, 6).map(exercise => ({
+      exerciseId: exercise.id, sets: 3, repMin: 8, repMax: 12,
+    })),
+  }));
+  data.scheduleRevisions = Array.from({ length: revisions }, (_, index) => ({
+    id: "revision-" + index, effectiveDate: addDays("2020-01-01", index),
+    anchorMonday: "2019-12-30",
+    slots: data.templates.map((plan, weekday) => ({ weekday, workoutIds: [plan.id, plan.id] })),
+    templates: structuredClone(data.templates),
+  }));
+  return data;
+}

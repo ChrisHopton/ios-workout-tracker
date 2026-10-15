@@ -611,19 +611,223 @@ test("label changes wait for the frozen batch and subscriptions end cleanly", as
   assert.equal(calls, before);
   app.controller.dispose();
 });
-test("a failed local enrollment activation restores the previous secure credential and frozen queue", async () => {
-  const app = setup();
-  app.repository.put(change(5));
-  const frozen = await app.repository.inFlight();
-  app.repository.activateEnrollment = async () => { throw new Error("Disk write failed"); };
+test("invalid replacement input leaves in-progress and automatic uploads intact", async () => {
+  for (const [replacement, label, message] of [
+    ["WORKOUTFB1.invalid", "Phone", /code is invalid/],
+    [code(), " ", /80 characters/],
+    [code(), "x".repeat(81), /80 characters/],
+  ] as const) {
+    const gate = deferred<CommitReceipt>();
+    const requests: SyncRequest[] = [];
+    const app = setup(async (request) => {
+      requests.push(request);
+      return requests.length === 1 ? gate.promise : success(request);
+    });
+    app.repository.put(change());
+    await app.controller.initialize();
+    const upload = app.controller.syncNow();
+    await settle();
+    await assert.rejects(app.controller.connect(replacement, label), message);
+    assert.equal(app.repository.events.includes("prepare"), false);
+    assert.equal(app.secrets.saves, 0);
+    gate.resolve(success(requests[0]));
+    await upload;
+    assert.equal(app.repository.acknowledgements.length, 1);
+    assert.equal(app.controller.getSnapshot().error, null);
+    app.repository.put(change(2));
+    app.controller.changed();
+    await app.time.advance(10_000);
+    assert.equal(requests.length, 2);
+    assert.equal(app.repository.rows.size, 0);
+    app.controller.dispose();
+  }
+});
+
+test("failed replacement resumes the previous frozen upload without activating the replacement label", async () => {
+  for (const failure of ["network", "activation", "save"] as const) {
+    const uploads: { request: SyncRequest; uid: string }[] = [];
+    const app = setup(async (request, credentials) => {
+      if (request.action === "bind" && failure === "network") throw new SyncError("Replacement offline", true);
+      if (request.action === "upload") uploads.push({ request: structuredClone(request), uid: credentials.uid });
+      return success(request);
+    });
+    app.repository.put(change(5));
+    const frozen = await app.repository.inFlight();
+    let activations = 0;
+    app.repository.activateEnrollment = async () => { activations++; throw new Error("Disk write failed"); };
+    await app.controller.initialize();
+    const rotated = { ...CREDENTIALS, uid: "rotated_uid", email: "rotated@example.com" };
+    if (failure === "save") app.secrets.save = async (credentials) => {
+      app.secrets.saved = { ...credentials };
+      if (credentials.uid === rotated.uid) throw new Error("Write completed before storage failure");
+    };
+    await assert.rejects(app.controller.connect(code(rotated), "New label"), /Replacement offline|remain saved/);
+    assert.equal((await app.secrets.load())?.uid, CREDENTIALS.uid);
+    assert.deepEqual(app.repository.frozen, frozen);
+    assert.equal(app.controller.getSnapshot().error, null);
+    assert.equal(app.controller.getSnapshot().busy, false);
+    await app.time.advance(0);
+    assert.equal(activations, failure === "activation" ? 1 : 0);
+    assert.equal((await app.repository.state())?.label, "My phone");
+    assert.deepEqual(uploads, [{
+      request: { action: "upload", installationId: INSTALLATION, changes: frozen!.changes },
+      uid: CREDENTIALS.uid,
+    }]);
+    assert.equal(app.repository.rows.size, 0);
+    assert.equal(app.controller.getSnapshot().status, "synced");
+    app.controller.dispose();
+  }
+});
+
+test("a refresh failure after activation keeps the committed replacement connection", async () => {
+  const uploadedWith: string[] = [];
+  const app = setup(async (request, credentials) => {
+    if (request.action === "upload") uploadedWith.push(credentials.uid);
+    return success(request);
+  });
   await app.controller.initialize();
-  const rotated = { ...CREDENTIALS, uid: "rotated_uid", email: "rotated@example.com" };
-  await assert.rejects(app.controller.connect(code(rotated), "New label"), /remain saved/);
-  assert.equal((await app.secrets.load())?.uid, CREDENTIALS.uid);
-  assert.equal((await app.repository.state())?.label, "My phone");
-  assert.deepEqual(app.repository.frozen, frozen);
-  assert.equal(app.controller.getSnapshot().busy, false);
+  const activate = app.repository.activateEnrollment.bind(app.repository);
+  app.repository.activateEnrollment = async (staged) => {
+    await activate(staged);
+    let fail = true;
+    app.repository.pendingCount = async () => {
+      if (fail) { fail = false; throw new Error("Read failed after activation"); }
+      return app.repository.rows.size;
+    };
+  };
+  const replacement = { ...CREDENTIALS, generationId: OTHER_INSTALLATION, uid: "replacement_uid" };
+  await assert.rejects(app.controller.connect(code(replacement), "New phone"), /remain saved/);
+  assert.equal((await app.secrets.load())?.uid, replacement.uid);
+  assert.equal(app.repository.local!.generationId, replacement.generationId);
+  await app.time.advance(15_000);
+  assert.ok(uploadedWith.length > 0);
+  assert.ok(uploadedWith.every((uid) => uid === replacement.uid));
+  assert.equal(app.controller.getSnapshot().status, "synced");
   app.controller.dispose();
+});
+
+test("failed replacement preserves the previous network retry deadline and backoff", async () => {
+  let uploads = 0;
+  const app = setup(async (request) => {
+    if (request.action === "bind") throw new SyncError("Replacement offline", true);
+    uploads++;
+    throw new SyncError("Original offline", true);
+  });
+  app.repository.put(change());
+  await app.controller.initialize();
+  await assert.rejects(app.controller.syncNow(), /Original offline/);
+  await app.time.advance(5_000);
+  await assert.rejects(app.controller.connect(code(), "New label"), /Replacement offline/);
+  assert.equal(app.controller.getSnapshot().error, "Original offline");
+  await app.time.advance(9_999);
+  assert.equal(uploads, 1);
+  await app.time.advance(1);
+  assert.equal(uploads, 2);
+  await app.time.advance(29_999);
+  assert.equal(uploads, 2);
+  await app.time.advance(1);
+  assert.equal(uploads, 3);
+  app.controller.dispose();
+});
+
+test("failed replacement preserves a previous authorization block", async () => {
+  let uploads = 0;
+  const app = setup(async (request) => {
+    if (request.action === "bind") throw new SyncError("Replacement offline", true);
+    uploads++;
+    throw new SyncError("Original authorization rejected", false, "auth");
+  });
+  app.repository.put(change());
+  await app.controller.initialize();
+  await assert.rejects(app.controller.syncNow(), /Original authorization/);
+  await assert.rejects(app.controller.connect(code(), "New label"), /Replacement offline/);
+  app.controller.changed(true);
+  app.controller.setActive(false);
+  app.controller.setActive(true);
+  await app.time.advance(600_000);
+  assert.equal(uploads, 1);
+  assert.equal(app.controller.getSnapshot().error, "Original authorization rejected");
+  assert.equal(app.controller.getSnapshot().bound, true);
+  app.controller.dispose();
+});
+
+test("failed replacement preserves a previous daily quota pause", async () => {
+  const requests: SyncRequest[] = [];
+  const app = setup(async (request) => { requests.push(request); return success(request); });
+  app.repository.put(change());
+  app.repository.remaining = 0;
+  app.repository.resetAt = app.time.time + 2_000;
+  await app.controller.initialize();
+  await assert.rejects(app.controller.syncNow(), /quota resets/);
+  const pausedUntil = app.controller.getSnapshot().pausedUntil;
+  await assert.rejects(app.controller.connect(code(), "New label"), /quota resets/);
+  assert.equal(app.controller.getSnapshot().status, "paused");
+  assert.equal(app.controller.getSnapshot().pausedUntil, pausedUntil);
+  await app.time.advance(1_999);
+  assert.equal(requests.length, 0);
+  await app.time.advance(1);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].action, "upload");
+  assert.equal(app.repository.local!.label, "My phone");
+  assert.equal(app.repository.rows.size, 0);
+  app.controller.dispose();
+});
+
+test("failed secure rollback disables saved enrollment and stops uploads despite cleanup failures", async () => {
+  for (const [removalFails, disconnectFails] of [[false, false], [true, false], [true, true]]) {
+    let calls = 0;
+    let removals = 0;
+    let disconnects = 0;
+    const app = setup(async () => { calls++; throw new SyncError("Replacement offline", true); });
+    app.repository.put(change());
+    const frozen = await app.repository.inFlight();
+    await app.controller.initialize();
+    const rotated = { ...CREDENTIALS, uid: "rotated_uid", email: "rotated@example.com" };
+    app.secrets.save = async (credentials) => {
+      if (credentials.uid === CREDENTIALS.uid) throw new Error("Keychain unavailable");
+      app.secrets.saved = { ...credentials };
+    };
+    app.secrets.remove = async () => {
+      removals++;
+      if (removalFails) throw new Error("Keychain unavailable");
+      app.secrets.saved = null;
+    };
+    const disconnect = app.repository.disconnect.bind(app.repository);
+    app.repository.disconnect = async () => {
+      disconnects++;
+      if (disconnectFails) throw new Error("Database unavailable");
+      await disconnect();
+    };
+    await assert.rejects(app.controller.connect(code(rotated), "New label"), /restored securely/);
+    assert.equal(removals, 1);
+    assert.equal(disconnects, 1);
+    assert.equal(app.controller.getSnapshot().status, "disconnected");
+    assert.equal(app.controller.getSnapshot().bound, false);
+    assert.match(app.controller.getSnapshot().error!, disconnectFails ? /disabled/ : /restored securely/);
+    app.controller.changed(true);
+    app.controller.setActive(false);
+    app.controller.setActive(true);
+    await app.time.advance(600_000);
+    await assert.rejects(app.controller.syncNow(), /Connect cloud/);
+    assert.equal(calls, 1);
+    assert.equal(app.repository.rows.size, 1);
+    assert.deepEqual(app.repository.frozen, frozen);
+    app.controller.dispose();
+    if (!disconnectFails) {
+      assert.equal(app.repository.local!.enabled, false);
+      assert.equal(app.repository.staged, null);
+      const restarted = new SyncController(app.repository, app.secrets, async (request) => {
+        calls++;
+        return success(request);
+      }, app.time.options);
+      await restarted.initialize();
+      await app.time.advance(600_000);
+      assert.equal(restarted.getSnapshot().status, "disconnected");
+      assert.equal(restarted.getSnapshot().bound, false);
+      assert.equal(calls, 1);
+      restarted.dispose();
+    }
+  }
 });
 
 test("initial completion stays false until its separate frozen marker is acknowledged", async () => {

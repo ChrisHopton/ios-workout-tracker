@@ -296,11 +296,14 @@ function validateVersion(value: unknown, version: 1 | 2, previous?: AppData): Ob
     version,
     new Set(exercises.map((item) => item.id)),
   );
+  const unchangedRevisions = new Set(previous?.scheduleRevisions.filter(Object.isFrozen));
   const revisions = array(
     data.scheduleRevisions,
     "scheduleRevisions",
     10000,
   ).map((value, index) => {
+    if (unchangedRevisions.has(value as AppData["scheduleRevisions"][number]))
+      return value as ObjectValue;
     const at = `scheduleRevisions[${index}]`;
     const item = object(value, at, [
       "id",
@@ -653,8 +656,5 @@ export function serializeBackup(data: AppData): string {
 
 export function serializeStoredBackup(data: LegacyAppData | AppData): string {
   validateStoredData(data);
-  const text = JSON.stringify(data);
-  if (byteLength(text) > MAX_BACKUP_BYTES)
-    throw new Error("Backup exceeds the 10 MiB size limit.");
-  return text;
+  return JSON.stringify(data);
 }

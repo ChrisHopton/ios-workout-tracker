@@ -1,4 +1,4 @@
-import { parseBackup, upgradeData, validateStoredData, type LegacyAppData } from "../domain/backup";
+import { upgradeData, validateStoredData, type LegacyAppData } from "../domain/backup";
 import { initialData } from "../domain/library";
 import { AppData, WorkoutSession } from "../domain/types";
 import { snapshot } from "./snapshot";
@@ -41,7 +41,9 @@ export function createJournalStorage(db: JournalDatabase, options: { beforeMigra
   async function write(data: AppData, migrate = false): Promise<void> {
     const next = snapshot(data, saved);
     const { sessions: records, ...details } = next;
-    const nextMetadata = JSON.stringify(details);
+    const sameMetadata = metadata !== "" && saved &&
+      (Object.keys(details) as (keyof typeof details)[]).every((key) => details[key] === saved![key]);
+    const nextMetadata = sameMetadata ? metadata : JSON.stringify(details);
     const nextSessions = new Map<string, StoredSession>();
     const changed: (StoredSession & { text: string })[] = [];
     for (const [position, session] of records.entries()) {
@@ -153,7 +155,7 @@ export function createJournalStorage(db: JournalDatabase, options: { beforeMigra
       const old = await db.getFirstAsync<{ value: string }>(
         "SELECT value FROM app_state WHERE id = 1",
       );
-      const next = old ? parseBackup(old.value) : initialData();
+      const next = old ? upgradeData(JSON.parse(old.value)) : initialData();
       await write(next, true);
       await db.execAsync("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");
       return next;

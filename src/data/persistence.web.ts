@@ -1,6 +1,6 @@
 import type { AppData } from "../domain/types";
 import { initialData } from "../domain/library";
-import { parseBackup } from "../domain/backup";
+import { upgradeData } from "../domain/backup";
 import { changedRows, makeProfileDocument, makeCompletionDocument, projectData } from "../sync/projection";
 import type { SyncLocalState, SyncRepository } from "../sync/controller";
 import { makeBatch, type DocumentChange, type UploadBatch, type SyncIdentity, type UploadDocument } from "../sync/protocol";
@@ -17,7 +17,7 @@ function same(a: SyncIdentity | null, b: SyncIdentity) {
 }
 export async function loadData(): Promise<AppData> {
   const value = localStorage.getItem(key);
-  priorData = value ? parseBackup(value) : initialData();
+  priorData = value ? upgradeData(JSON.parse(value)) : initialData();
   if (value && JSON.parse(value).schemaVersion === 1) {
     localStorage.setItem("workout-browser-before-v1-to-v2", value);
     localStorage.setItem(key, JSON.stringify(priorData));
@@ -61,7 +61,7 @@ export const syncRepository: SyncRepository = {
       outbox.set(doc.key, { ...doc, revision: ++syncState.clock, deleted: false });
     }
   },
-  disconnect: async () => { if (syncState) syncState.enabled = false; },
+  disconnect: async () => { if (syncState) syncState.enabled = false; staging = null; },
   setLabel: async (label) => {
     if (!syncState || !priorData) throw new Error("Connect the preview first.");
     syncState.label = label;

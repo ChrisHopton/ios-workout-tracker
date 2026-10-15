@@ -163,20 +163,28 @@ export class SyncController {
   connect(code: string, value: string): Promise<void> {
     if (this.connecting) return Promise.reject(new SyncError("A cloud connection is already being checked.", false, "invalid"));
     if (this.disposed) return Promise.reject(new SyncError("Sync has stopped.", false, "invalid"));
+    let credentials: SyncCredentials;
+    let label: string;
+    try {
+      try { credentials = parseConnectionCode(code); } catch {
+        throw new SyncError("The cloud connection code is invalid.", false, "invalid");
+      }
+      label = checkedLabel(value);
+    } catch (error) { return Promise.reject(error); }
     this.connecting = true;
     ++this.generation;
     const configuration = ++this.configuration;
+    const resumeAt = this.timerAt;
     this.clearSchedule();
     return this.control(async () => {
-      const previous = this.credentials;
-      let saved = false;
+      const previous = {
+        credentials: this.credentials, error: this.snapshot.error, blockedError: this.blockedError,
+        retryAt: this.retryAt, quotaUntil: this.quotaUntil, retryDelay: this.retryDelay,
+      };
+      let restoreSecrets = false;
+      let activated = false;
       try {
         if (!this.active) throw new SyncError("Open the app to connect cloud uploads.", true);
-        let credentials: SyncCredentials;
-        try { credentials = parseConnectionCode(code); } catch {
-          throw new SyncError("The cloud connection code is invalid.", false, "invalid");
-        }
-        const label = checkedLabel(value);
         const installationId = this.installationId();
         if (!UUID.test(installationId)) throw new SyncError("A secure installation identity could not be created.", false, "invalid");
         const staged = await this.repository.prepareEnrollment({
@@ -184,8 +192,8 @@ export class SyncController {
         }, label, installationId);
         if (!this.currentConfiguration(configuration)) return;
         this.checkStaged(staged, credentials);
+        restoreSecrets = true;
         await this.secrets.save(credentials);
-        saved = true;
         if (!this.currentConfiguration(configuration)) return;
         this.credentials = credentials;
         await this.reserve(1);
@@ -195,6 +203,7 @@ export class SyncController {
         ));
         if (!this.currentConfiguration(configuration)) return;
         await this.repository.activateEnrollment(staged);
+        activated = true;
         if (!this.currentConfiguration(configuration)) return;
         this.blockedError = null;
         this.retryAt = null;
@@ -204,17 +213,36 @@ export class SyncController {
         this.scheduleAt(this.now());
       } catch (error) {
         if (this.currentConfiguration(configuration)) {
-          if (saved) {
-            try {
-              if (previous) await this.secrets.save(previous);
-              else await this.secrets.remove();
-            } catch {
-              error = new SyncError("The cloud connection could not be saved securely. Replace the connection code.", false, "storage");
+          if (activated) {
+            this.fail(safeError(error), true);
+          } else {
+            let restored = true;
+            if (restoreSecrets) {
+              try {
+                if (previous.credentials) await this.secrets.save(previous.credentials);
+                else await this.secrets.remove();
+              } catch {
+                restored = false;
+                error = new SyncError("The previous cloud connection could not be restored securely. Replace the connection code.", false, "storage");
+                try { await this.repository.disconnect(); } catch {
+                  error = new SyncError("The previous cloud connection could not be restored securely or disabled. Replace the connection code before reopening the app.", false, "storage");
+                }
+                try { await this.secrets.remove(); } catch {}
+              }
+            }
+            if (!this.currentConfiguration(configuration)) return;
+            this.credentials = restored ? previous.credentials : null;
+            this.blockedError = previous.blockedError;
+            this.retryAt = previous.retryAt;
+            this.quotaUntil = previous.quotaUntil;
+            this.retryDelay = previous.retryDelay;
+            await this.refresh(this.generation, previous.error).catch(() => undefined);
+            if (this.credentials) {
+              this.scheduleAt(resumeAt ?? this.now());
+            } else {
+              this.fail(safeError(error), false);
             }
           }
-          this.credentials = previous;
-          await this.refresh(this.generation).catch(() => undefined);
-          this.fail(safeError(error), false);
         }
         throw safeError(error);
       } finally {
@@ -447,7 +475,7 @@ export class SyncController {
       const credentials = this.credentials;
       let [state, staged] = await Promise.all([this.repository.state(), this.repository.pendingEnrollment()]);
       if (!this.current(generation) || !this.active) return;
-      if (matches(staged, credentials)) {
+      if (matches(staged, credentials) && !(matches(state, credentials) && state!.enabled && state!.bound)) {
         this.checkStaged(staged!, credentials);
         await this.reserve(1);
         if (!this.current(generation) || !this.active) return;

@@ -30,6 +30,8 @@ npx eas-cli@latest init
 
 Select your own Expo account/project when prompted. `init` links the folder to your EAS project and records its project ID. Keep that configuration for future builds. Before the first build, review `expo.ios.bundleIdentifier` in `app.json`; use a stable identifier you own, for example `com.yourname.workout`. If Apple reports that the identifier is taken, change it before installing your first build. Keep it unchanged for later updates.
 
+The October 15 compatibility check reports two deferred SDK patch updates: `expo` 57.0.29 to expected 57.0.30, and `expo-router` 57.0.27 to expected 57.0.28. Expo Doctor passes 20 of 21 checks with that warning visible. Follow the [dependency maintenance brief](DEFERRED_WORK.md#dependency-security-maintenance) before claiming a clean dependency check.
+
 The repository already includes `eas.json`. Preserve the `preview` profile's `distribution: internal` and `developmentClient: false` settings. Do not select a simulator or App Store profile for direct installation. [EAS configuration workflow](https://docs.expo.dev/build/setup/)
 
 ## 3. Register the iPhone and build
@@ -70,7 +72,7 @@ Before upgrading an existing installation to SQLite schema version 5, the native
 
 Home's **+** opens **Workout Plans**. Create and edit there, choose Weekly or Every 2 weeks, and review the dated two-week preview. Existing custom schedules remain unchanged until their recurrence is explicitly changed. Record working and optional warm-up sets, then check the next-workout recommendation in Analytics. Body-weight entries are optional and editable in Settings or Analytics. No effort rating is required.
 
-Backups exported by this release use JSON version 2. Earlier version 1 backups can still be restored. Install over the existing app rather than uninstalling so that the version 5 migration can preserve the existing journal, credentials, and in-flight uploads.
+Backups exported by this release use JSON version 2. Earlier version 1 backups can still be restored. Portable exports and Settings imports are limited to **10 MiB**. The automatic internal migration copy has no such size guard, but a copy above 10 MiB cannot currently be restored through Settings. Keep that copy outside app storage and retain the existing installation; [large-history portable recovery](DEFERRED_WORK.md#large-history-portable-backups) remains deferred. Install over the existing app rather than uninstalling so that the version 5 migration can preserve the existing journal, credentials, and in-flight uploads.
 
 ## Updates, signing expiry, and a second person
 

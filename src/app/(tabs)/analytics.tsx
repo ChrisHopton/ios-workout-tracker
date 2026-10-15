@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
-import { View } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { AppState, View } from "react-native";
+import { useFocusEffect } from "expo-router";
 import { useApp } from "../../data/store";
 import { summarize } from "../../domain/analytics";
 import { formatDate, today } from "../../domain/dates";
-import { MUSCLE_GROUPS, MuscleGroup } from "../../domain/types";
+import { AppData, MUSCLE_GROUPS, MuscleGroup } from "../../domain/types";
 import { loadLabel } from "../../domain/library";
 import { BarChart, LineChart } from "../../components/charts";
 import { BodyWeightSettings } from "../../components/BodyWeightSettings";
@@ -13,15 +14,39 @@ const round = (value: number) => Math.round(value * 100) / 100;
 const shortDate = (date: string) => formatDate(date, { month: "short", day: "numeric" });
 
 export default function Analytics() {
-  const { data } = useApp();
+  const { data: currentData } = useApp();
+  const [data, setData] = useState<AppData | null>(null);
   const t = useTheme();
   const [weeks, setWeeks] = useState(8);
   const [group, setGroup] = useState<MuscleGroup>("Legs");
   const [variantId, setVariantId] = useState("");
   const [nextExerciseId, setNextExerciseId] = useState("");
   const [metric, setMetric] = useState<"weight" | "reps" | "strength">("weight");
-  const endDate = today();
-  const result = useMemo(() => summarize(data, weeks, endDate, data.settings.unit), [data, weeks, endDate]);
+  const [endDate, setEndDate] = useState(today);
+  // Retain the visible snapshot on blur so hidden recording edits do not rebuild analytics
+  useFocusEffect(useCallback(() => {
+    setData(currentData);
+  }, [currentData]));
+  useFocusEffect(useCallback(() => {
+    let midnight: ReturnType<typeof setTimeout>;
+    function refreshDate() {
+      clearTimeout(midnight);
+      setEndDate(today());
+      const now = new Date();
+      const nextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      midnight = setTimeout(refreshDate, nextDay.getTime() - now.getTime());
+    }
+    refreshDate();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshDate();
+    });
+    return () => {
+      clearTimeout(midnight);
+      subscription.remove();
+    };
+  }, []));
+  const result = useMemo(() => data ? summarize(data, weeks, endDate, data.settings.unit) : null, [data, weeks, endDate]);
+  if (!data || !result) return <Screen><Txt muted>Loading progress…</Txt></Screen>;
   const history = result.exerciseHistory.find((entry) => entry.variantId === variantId) ?? result.exerciseHistory[0];
   const next = result.nextWorkout;
   const nextExercise = next?.exercises.find((entry) => entry.id === nextExerciseId) ?? next?.exercises[0];
@@ -54,7 +79,7 @@ export default function Analytics() {
         </Card>
       </Row>
       {next && <Card>
-        <SectionTitle>Next workout</SectionTitle>
+        <SectionTitle>Next planned workout</SectionTitle>
         <Txt bold>{next.title} · {formatDate(next.date, { weekday: "short", month: "short", day: "numeric" })}</Txt>
         <Row style={{ flexWrap: "wrap", gap: 7 }}>{next.exercises.map((entry) => <Chip key={entry.id} label={entry.name} selected={entry.id === nextExercise?.id} onPress={() => setNextExerciseId(entry.id)} />)}</Row>
         {nextExercise && <>

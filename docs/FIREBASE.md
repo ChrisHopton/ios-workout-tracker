@@ -112,7 +112,7 @@ For a lost, reinstalled, or replacement phone, use **replace**, which keeps the 
 npm run firebase:setup -- replace --project YOUR_FIREBASE_PROJECT_ID --api-key YOUR_PUBLIC_WEB_API_KEY --uid EXISTING_ACCOUNT_UID --output "$env:USERPROFILE\.workout-sync\firebase-replacement.json"
 ```
 
-Restore the local JSON journal backup on the new phone before connecting if you want its history uploaded. The new installation enrolls only in its new generation; the old generation remains archived and cannot be overwritten by the new phone. A code for the old generation cannot bind a fresh installation UUID. The app does not recover data from Firestore. Keep only one current phone active per device slot, and stop the old installation from uploading.
+Restore the local JSON journal backup on the new phone before connecting if you want its history uploaded. Settings imports are limited to 10 MiB; an oversized internal pre-migration copy cannot currently be restored this way. Preserve the existing installation and see the [large-history portable backup follow-up](DEFERRED_WORK.md#large-history-portable-backups) before replacing a phone with a journal above that limit. The new installation enrolls only in its new generation; the old generation remains archived and cannot be overwritten by the new phone. A code for the old generation cannot bind a fresh installation UUID. The app does not recover data from Firestore. Keep only one current phone active per device slot, and stop the old installation from uploading.
 
 ## Migrate and retire the former Google Sheets connection
 

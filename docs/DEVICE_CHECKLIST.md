@@ -19,8 +19,8 @@ Record device, iOS version, build number, tester, and date here:
 ## Plans and schedules
 
 - [ ] Create three workouts on Monday, Tuesday, and Wednesday. Verify they repeat the next week.
-- [ ] Add a second workout on each of those days. Verify A/B alternation over four weeks; swap an order and inspect the preview.
-- [ ] A third assignment on the same weekday is rejected with a useful message.
+- [ ] Change a plan to Every 2 weeks, then add a second plan on the same weekday with the opposite starting week. Verify the dated alternation over four weeks.
+- [ ] An assignment that conflicts with an occupied weekly/fortnightly date is rejected with a useful message.
 - [ ] Search exercises, create a custom exercise, reorder exercises, and save set counts/rep ranges.
 - [ ] Edit/archive a plan and verify yesterday's schedule and recorded targets retain their old values.
 - [ ] Record a previous day, choose a manual workout on a rest day, and verify future dates cannot be recorded.
@@ -32,13 +32,16 @@ Record device, iOS version, build number, tester, and date here:
 - [ ] Accept a suggestion, override it, and confirm actual values remain distinct from the suggestion until accepted.
 - [ ] Attempt to finish with pending sets; resolve each by completing or explicitly skipping. Reopen a finished workout and edit it.
 - [ ] Dumbbell loads say per dumbbell, barbell loads include the bar, and bodyweight exercises accept reps without a weight.
-- [ ] When testing storage failure in a development build, show a visible error and Retry, then recover the latest values once storage works.
+- [ ] When testing storage failure in a development build, show a visible error and Retry, then recover the latest values once storage works. Inject an upload-state database read failure and confirm the journal and outbox both roll back, then both save on retry.
+- [ ] With 1,000 workouts and 100/500 retained schedule revisions, measure recording responsiveness on the phone; compare editing and navigation without deleting history. Desktop measurements alone do not complete this check.
 
 ## Analytics and settings
 
 - [ ] Finish two matching workouts at the upper rep target. Verify the next suggestion and its reason; check no-history/bodyweight states too.
 - [ ] Skipped sets and unfinished workouts do not inflate charts. A historical day does not use later performance for suggestions.
 - [ ] Review 4-, 8-, and 12-week charts, muscle group totals, exercise history, and scheduled completion.
+- [ ] Set Analytics filters, enter an unfinished body-weight draft, and scroll. Leave to record a workout, then return: results update while the filters, draft, and scroll position remain.
+- [ ] Background/resume Analytics and cross local midnight with the app open or backgrounded. Verify date-sensitive ranges and scheduled completion refresh for the new day.
 - [ ] Change pounds/kilograms and height units; historical weights convert appropriately without changing stored session units or losing fractions.
 - [ ] Save optional demographics, close/reopen, and confirm they persist without changing progression rules.
 
@@ -71,7 +74,8 @@ Complete the owner deployment and private setup in [Firestore setup](FIREBASE.md
 - [ ] Make a harmless edit, restore the backup with confirmation, and verify plans, revisions, profile, sessions, fractions, and unfinished drafts.
 - [ ] Cancel file selection and replacement confirmation; current data stays unchanged.
 - [ ] Try malformed JSON and an unsupported schema version; show an error and preserve current data.
-- [ ] Install a newer preview build over the app with the same identifier; verify all existing history remains when the database migrates to SQLite schema version 5. Confirm the automatic private pre-migration JSON copy is created before migration and can be shared with Export pre-migration backup.
+- [ ] Round-trip a portable backup within 10 MiB and verify a file above 10 MiB is rejected by Settings without altering the journal. This release does not support larger portable restores.
+- [ ] Install a newer preview build over the app with the same identifier; verify all existing history remains when the database migrates to SQLite schema version 5. Confirm the automatic private pre-migration JSON copy is created before migration and can be shared with Export pre-migration backup. Include a valid local journal above 10 MiB: its internal copy must not be blocked by the portable guard, but Settings restore of that oversized copy remains unsupported.
 - [ ] Record installed app and Documents & Data sizes in iPhone Storage before and after adding representative history. Check recording and chart responsiveness on the actual phone.
 - [ ] If using a second phone, verify it has separate data and works offline.
 
