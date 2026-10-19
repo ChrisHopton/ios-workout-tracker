@@ -46,14 +46,16 @@ export function useTheme() {
 export function Screen({
   children,
   scroll = true,
+  bottomSafeArea = true,
 }: {
   children: React.ReactNode;
   scroll?: boolean;
+  bottomSafeArea?: boolean;
 }) {
   const t = useTheme();
   return (
     <SafeAreaView
-      edges={["left", "right", "bottom"]}
+      edges={bottomSafeArea ? ["left", "right", "bottom"] : ["left", "right"]}
       style={{ flex: 1, backgroundColor: t.bg }}
     >
       <KeyboardAvoidingView

@@ -180,7 +180,7 @@ export default function Settings() {
     );
   }
   return (
-    <Screen>
+    <Screen bottomSafeArea={false}>
       <Txt bold style={{ fontSize: 30, lineHeight: 38 }}>
         Make it yours
       </Txt>

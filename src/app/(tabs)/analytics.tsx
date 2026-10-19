@@ -46,7 +46,7 @@ export default function Analytics() {
     };
   }, []));
   const result = useMemo(() => data ? summarize(data, weeks, endDate, data.settings.unit) : null, [data, weeks, endDate]);
-  if (!data || !result) return <Screen><Txt muted>Loading progress…</Txt></Screen>;
+  if (!data || !result) return <Screen bottomSafeArea={false}><Txt muted>Loading progress…</Txt></Screen>;
   const history = result.exerciseHistory.find((entry) => entry.variantId === variantId) ?? result.exerciseHistory[0];
   const next = result.nextWorkout;
   const nextExercise = next?.exercises.find((entry) => entry.id === nextExerciseId) ?? next?.exercises[0];
@@ -58,7 +58,7 @@ export default function Analytics() {
     ? history?.strengthPoints.map((point) => ({ date: point.date, value: round(point.estimate) })) ?? []
     : history?.points.map((point) => ({ date: point.date, value: round(effectiveMetric === "reps" ? point.reps : point.weight ?? 0) })) ?? [];
   return (
-    <Screen>
+    <Screen bottomSafeArea={false}>
       <View style={{ gap: 6 }}>
         <Txt bold style={{ fontSize: 30, lineHeight: 38 }}>See your progress</Txt>
         <Txt muted>Small steps. A stronger routine.</Txt>

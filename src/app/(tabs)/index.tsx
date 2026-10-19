@@ -69,7 +69,7 @@ export default function Home() {
     }
   }
   return (
-    <Screen>
+    <Screen bottomSafeArea={false}>
       <Tabs.Screen
         options={{
           headerRight: () => (
@@ -77,9 +77,9 @@ export default function Home() {
               accessibilityRole="button"
               accessibilityLabel="Create or edit workout plans"
               onPress={() => router.push("/plans")}
-              style={{ padding: 12, marginRight: 6 }}
+              style={{ width: 44, height: 44, justifyContent: "center", alignItems: "center", marginRight: 8 }}
             >
-              <Ionicons name="add-circle" size={30} color={t.accent} />
+              <Ionicons name="add-circle" size={28} color={t.accent} />
             </Pressable>
           ),
         }}

@@ -1,4 +1,12 @@
-# Verification report — October 15, 2026
+# Verification report — October 19, 2026
+
+## October 19 iPhone layout correction
+
+The Home create-plan button now uses a centered 28-point icon inside a 44-by-44 touch target instead of a padded 54-point control. Bottom tabs use the navigator's standard bar height and safe-area padding, with standard-sized labels protected from text shrinkage. Home, Analytics, and Settings no longer add the bottom safe-area inset a second time; editor and recording screens retain their own bottom protection.
+
+TypeScript, Expo ESLint, the final tab-layout lint check, and production iOS export passed. Browser checks at 393-by-852, 430-by-932, and 440-by-956 verified the create button stays within the viewport and opens Workout Plans, all three bottom tabs remain anchored to the viewport bottom, and the plan editor opens and cancels normally. The final preview confirmed complete tab labels after disabling label shrinkage.
+
+Browser viewport checks do not emulate native iOS headers, Dynamic Island, or home-indicator insets. Verify the reported clipping and spacing on the installed Pro Max using the updated device checklist. This pass did not publish an OTA update or perform physical-phone acceptance.
 
 ## October 15 cleanup verification
 

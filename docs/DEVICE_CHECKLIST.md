@@ -12,6 +12,7 @@ Record device, iOS version, build number, tester, and date here:
 
 - [ ] Install from EAS on a registered phone, enable Developer Mode, and launch.
 - [ ] Home, Analytics, and Settings are reachable using bottom tabs.
+- [ ] On a standard iPhone and a Pro Max, the top-right create-plan icon is fully visible and tappable, and bottom tabs sit above the home indicator without a duplicate safe-area gap. Check Home, Analytics, Settings, and the plan editor/recording screens.
 - [ ] Check light and dark appearance, larger accessibility text, screen-reader labels, safe areas, and tap targets.
 - [ ] Check every form with the keyboard open, including inputs near the bottom and decimal weights.
 - [ ] Stop the PC server, enable airplane mode, and verify the app launches and remains usable.
