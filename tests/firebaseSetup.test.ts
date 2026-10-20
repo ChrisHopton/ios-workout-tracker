@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { parseConnectionCode, type SyncCredentials } from "../src/sync/protocol";
+import { parseConnectionCode, type LegacySyncCredentials } from "../src/sync/protocol";
 import { generateCredentials, parseSetupArguments, provision, reservePrivateOutput, resolvePrivateOutput, revoke, runSetup, setupBundle, type Authorization, type OwnerBackend, type PrivateSetup } from "../scripts/firebaseSetup";
 
 const PROJECT = "demo-workout-sync";
 const API_KEY = "A".repeat(39);
 function owner() {
-  const users = new Map<string, { disabled: boolean; credentials: SyncCredentials }>();
+  const users = new Map<string, { disabled: boolean; credentials: LegacySyncCredentials }>();
   const registry = new Map<string, Authorization>();
   const events: string[] = [];
   let failCreation = 0;

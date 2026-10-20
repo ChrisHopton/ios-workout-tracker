@@ -1,8 +1,9 @@
 import type { Connection, JournalDatabase } from "../data/journalStorage";
+import { validateBootstrap, type BootstrapDraft } from "./bootstrap";
 import type { AppData } from "../domain/types";
 import type { SyncLocalState } from "./controller";
 import { changedRows, makeProfileDocument, projectData, projectMetadata, projectSession, makeCompletionDocument } from "./projection";
-import { validateIdentity, makeBatch, type SyncIdentity, type UploadBatch, type UploadDocument, type UploadKind } from "./protocol";
+import { validateIdentity, makeBatch, sameIdentity, type SyncIdentity, type UploadBatch, type UploadDocument, type UploadKind } from "./protocol";
 
 interface StoredQueue {
   key: string;
@@ -28,9 +29,6 @@ export function nextPacificDay(at: number): number {
     else high = middle;
   }
   return high;
-}
-function sameIdentity(a: SyncIdentity | null, b: SyncIdentity): boolean {
-  return !!a && a.projectId === b.projectId && a.deviceId === b.deviceId && a.generationId === b.generationId;
 }
 function nextClock(clock: number): number {
   if (!Number.isSafeInteger(clock) || clock < 0 || clock >= Number.MAX_SAFE_INTEGER)
@@ -58,6 +56,7 @@ export function createSyncJournal(db: JournalDatabase) {
     if (initialized) return;
     await db.withExclusiveTransactionAsync(async (tx) => {
       await tx.execAsync(
+        "CREATE TABLE IF NOT EXISTS upload_bootstrap (id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL); " +
         "CREATE TABLE IF NOT EXISTS upload_state (id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL); " +
         "CREATE TABLE IF NOT EXISTS upload_enrollment (id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL); " +
         "CREATE TABLE IF NOT EXISTS upload_records (key TEXT PRIMARY KEY, kind TEXT NOT NULL) WITHOUT ROWID; " +
@@ -83,6 +82,27 @@ export function createSyncJournal(db: JournalDatabase) {
   }
   async function storeState(connection: Connection, state: SyncLocalState, table = "upload_state") {
     await connection.runAsync(`INSERT INTO ${table} (id, value) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET value = excluded.value`, JSON.stringify(state));
+  }
+  async function prepareBootstrap(candidate: BootstrapDraft): Promise<BootstrapDraft> {
+    await initialize();
+    validateBootstrap(candidate);
+    let result!: BootstrapDraft;
+    await db.withExclusiveTransactionAsync(async (tx) => {
+      // SQL failures and malformed identities are deliberately not treated as absence.
+      if (await readState(tx) || await readState(tx, "upload_enrollment"))
+        throw new Error("An upload identity already exists.");
+      const stored = await tx.getFirstAsync<{ value: string }>("SELECT value FROM upload_bootstrap WHERE id = 1");
+      for (const table of ["upload_records", "upload_outbox", "upload_inflight", "upload_budget"]) {
+        const evidence = await tx.getFirstAsync<{ count: number }>(`SELECT COUNT(*) AS count FROM ${table}`);
+        if (!evidence || evidence.count !== 0) throw new Error("Existing upload state needs owner repair.");
+      }
+      const sequence = await tx.getFirstAsync<{ counter: number }>("SELECT counter FROM upload_sequence WHERE id = 1");
+      if (!sequence || sequence.counter !== 0) throw new Error("Existing upload revisions need owner repair.");
+      if (stored) { result = validateBootstrap(JSON.parse(stored.value)); return; }
+      result = candidate;
+      await tx.runAsync("INSERT INTO upload_bootstrap (id, value) VALUES (1, ?)", JSON.stringify(result));
+    });
+    return result;
   }
   async function pendingEnrollment() { await initialize(); return readState(db, "upload_enrollment"); }
   async function state() {
@@ -164,7 +184,7 @@ export function createSyncJournal(db: JournalDatabase) {
       } else if (current.label !== activated.label) {
         await queue(tx, [{ ...makeProfileDocument(data.settings, activated.deviceId, activated.label), deleted: false }], activated);
       }
-      await tx.execAsync("DELETE FROM upload_enrollment;");
+      await tx.execAsync("DELETE FROM upload_enrollment; DELETE FROM upload_bootstrap;");
     });
   }
   async function disconnect() {
@@ -259,5 +279,5 @@ export function createSyncJournal(db: JournalDatabase) {
         await db.execAsync("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);").catch(() => undefined);
     }
   }
-  return { initialize, capture, state, pendingEnrollment, prepareEnrollment, activateEnrollment, disconnect, setLabel, pendingCount, inFlight, reserveAttempt, acknowledge };
+  return { initialize, capture, prepareBootstrap, state, pendingEnrollment, prepareEnrollment, activateEnrollment, disconnect, setLabel, pendingCount, inFlight, reserveAttempt, acknowledge };
 }

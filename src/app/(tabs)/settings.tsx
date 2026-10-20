@@ -16,6 +16,7 @@ import {
 import { SyncSettings } from "../../components/SyncSettings";
 import { BodyWeightSettings } from "../../components/BodyWeightSettings";
 import { SaveIndicator } from "../../components/SaveIndicator";
+import { GenderSelector } from "../../components/GenderSelector";
 
 type HeightFields = { cm: string; feet: string; inches: string };
 function heightFields(cm: number | null): HeightFields {
@@ -134,7 +135,7 @@ export default function Settings() {
         settings: {
           ...current.settings,
           age,
-          gender: gender.trim(),
+          gender,
           heightCm: cm,
         },
       }));
@@ -175,7 +176,7 @@ export default function Settings() {
       <Card>
         <SectionTitle>Your profile</SectionTitle>
         <Txt muted style={{ fontSize: 13 }}>
-          Optional. Included in database when connected.
+          Optional. Included with your automatic workout uploads.
         </Txt>
         <Field
           label="Age"
@@ -188,15 +189,12 @@ export default function Settings() {
           maxLength={3}
           placeholder="Optional"
         />
-        <Field
-          label="Gender"
+        <GenderSelector
           value={gender}
-          editable={!busy}
-          onChangeText={(value) => {
+          disabled={busy}
+          onChange={(value) => {
             if (!busyRef.current) setGender(value);
           }}
-          maxLength={80}
-          placeholder="Optional"
         />
         {data.settings.unit === "kg" ? (
           <Field
@@ -322,7 +320,7 @@ export default function Settings() {
           )}
         </>}
       </Card>
-      <SyncSettings disabled={busy} />
+      <SyncSettings />
     </Screen>
   );
 }

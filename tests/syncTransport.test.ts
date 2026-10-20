@@ -4,13 +4,13 @@ import {
   createSyncTransport, makeCommitBody, nextPacificReset, requestSync,
   SyncError, validateResponse, type SyncRequest, type TransportOptions,
 } from "../src/sync/transport";
-import { makeDocumentKey, type DocumentChange, type SyncCredentials } from "../src/sync/protocol";
+import { makeDocumentKey, type DocumentChange, type LegacySyncCredentials } from "../src/sync/protocol";
 import * as secrets from "../src/sync/credentials.web";
 
 const DEVICE = "11111111-1111-4111-8111-111111111111";
 const GENERATION = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION = "33333333-3333-4333-8333-333333333333";
-const CREDENTIALS: SyncCredentials = {
+const CREDENTIALS: LegacySyncCredentials = {
   version: 1, projectId: "workout-test", apiKey: "a".repeat(39), deviceId: DEVICE,
   generationId: GENERATION, uid: "phone_one", email: "phone@example.com",
   password: "private-test-password",

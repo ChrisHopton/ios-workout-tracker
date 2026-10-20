@@ -1,5 +1,5 @@
 import * as SecureStore from "expo-secure-store";
-import { validateCredentials, type SyncCredentials } from "./protocol";
+import { sameIdentity, validateCredentials, type SyncCredentials } from "./protocol";
 
 const KEY = "workout.firebase.credentials.v1";
 const LEGACY_KEY = "workout.sheets.credentials.v1";
@@ -16,27 +16,36 @@ function serial<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 function same(left: SyncCredentials, right: SyncCredentials): boolean {
-  return JSON.stringify(validateCredentials(left)) === JSON.stringify(validateCredentials(right));
+  const a = validateCredentials(left);
+  const b = validateCredentials(right);
+  if (a.version === 2 && b.version === 2) return sameIdentity(a, b) && a.apiKey === b.apiKey;
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 function token(value: unknown): string | null {
   if (value === null) return null;
   if (typeof value !== "string" || !/^[!-~]{1,16384}$/.test(value)) throw new Error();
   return value;
 }
+class InvalidStoredCredentials extends Error {}
 async function read(): Promise<StoredCredentials | null> {
+  // Storage errors (for example a locked keychain) must not be treated as missing/corrupt data.
   const text = await SecureStore.getItemAsync(KEY, OPTIONS);
   if (text === null) return null;
-  const value: unknown = JSON.parse(text);
-  if (
-    !value || typeof value !== "object" || Array.isArray(value) ||
-    Object.keys(value).length !== 2 ||
-    !Object.hasOwn(value, "credentials") || !Object.hasOwn(value, "refreshToken")
-  ) throw new Error();
-  const stored = value as StoredCredentials;
-  return {
-    credentials: validateCredentials(stored.credentials),
-    refreshToken: token(stored.refreshToken),
-  };
+  try {
+    const value: unknown = JSON.parse(text);
+    if (
+      !value || typeof value !== "object" || Array.isArray(value) ||
+      Object.keys(value).length !== 2 ||
+      !Object.hasOwn(value, "credentials") || !Object.hasOwn(value, "refreshToken")
+    ) throw new Error();
+    const stored = value as StoredCredentials;
+    return {
+      credentials: validateCredentials(stored.credentials),
+      refreshToken: token(stored.refreshToken),
+    };
+  } catch {
+    throw new InvalidStoredCredentials();
+  }
 }
 
 export function loadCredentials(): Promise<SyncCredentials | null> {
@@ -45,7 +54,7 @@ export function loadCredentials(): Promise<SyncCredentials | null> {
       await SecureStore.deleteItemAsync(LEGACY_KEY, OPTIONS);
       return (await read())?.credentials ?? null;
     } catch {
-      throw new Error("The saved cloud connection could not be read. Replace the connection code and try again.");
+      throw new Error("The saved cloud connection could not be read. Unlock your phone and try again.");
     }
   });
 }
@@ -54,10 +63,15 @@ export function saveCredentials(credentials: SyncCredentials): Promise<void> {
     try {
       const checked = validateCredentials(credentials);
       let previous: StoredCredentials | null = null;
-      try { previous = await read(); } catch { previous = null; }
+      try { previous = await read(); } catch (error) {
+        if (!(error instanceof InvalidStoredCredentials)) throw error;
+      }
+      const refreshToken = previous && same(previous.credentials, checked)
+        ? previous.refreshToken ?? (previous.credentials.version === 2 ? previous.credentials.refreshToken : null)
+        : checked.version === 2 ? checked.refreshToken : null;
       await SecureStore.setItemAsync(KEY, JSON.stringify({
-        credentials: checked,
-        refreshToken: previous && same(previous.credentials, checked) ? previous.refreshToken : null,
+        credentials: checked.version === 2 && refreshToken ? { ...checked, refreshToken } : checked,
+        refreshToken,
       }), OPTIONS);
       await SecureStore.deleteItemAsync(LEGACY_KEY, OPTIONS);
     } catch {
@@ -69,9 +83,11 @@ export function loadRefreshToken(credentials: SyncCredentials): Promise<string |
   return serial(async () => {
     try {
       const stored = await read();
-      return stored && same(stored.credentials, credentials) ? stored.refreshToken : null;
+      return stored && same(stored.credentials, credentials)
+        ? stored.refreshToken ?? (stored.credentials.version === 2 ? stored.credentials.refreshToken : null)
+        : null;
     } catch {
-      throw new Error("The saved cloud authorization could not be read. Replace the connection code.");
+      throw new Error("The saved cloud authorization could not be read. Unlock your phone and try again.");
     }
   });
 }
@@ -82,7 +98,7 @@ export function saveRefreshToken(credentials: SyncCredentials, refreshToken: str
       const stored = await read();
       if (!stored || !same(stored.credentials, credentials) || stored.refreshToken === checked) return;
       await SecureStore.setItemAsync(KEY, JSON.stringify({
-        credentials: stored.credentials,
+        credentials: stored.credentials.version === 2 ? { ...stored.credentials, refreshToken: checked } : stored.credentials,
         refreshToken: checked,
       }), OPTIONS);
     } catch {

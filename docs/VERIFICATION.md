@@ -1,5 +1,27 @@
 # Verification report — October 19, 2026
 
+## Automatic private uploads and Settings — October 19, 2026
+
+This release replaces database setup forms with automatic anonymous Firebase enrollment and a read-only disclosure/status panel. Gender uses a themed accessible selection sheet; legacy custom values stay intact until changed. Native Firebase App Check uses production App Attest only, with explicit headers on Firestore REST commits. Public app configuration is bundled; private device credentials and refresh tokens remain in device-only Keychain storage.
+
+| Check | Result |
+| --- | --- |
+| Complete application suite | 282 passed, 0 failed, 1 emulator-only skip |
+| Firestore emulator | 20 passed separately, including own/cross-account read denial, enrollment gate, immutable binding, revocation and atomic failures |
+| TypeScript / Expo lint | Passed |
+| Production iOS export | Passed; 1,377 modules, 3,614,242 bytes total; 3,199,705-byte Hermes bundle |
+| Expo compatibility / Doctor | 20/21; existing Expo 57.0.29→57.0.30 and Router 57.0.27→57.0.28 patch warnings remain |
+| Browser | Selector save/reload and cancel verified; final mock enrollment reaches Up to date; no code/connection controls |
+| Native binary, attestation and installed phones | Blocked on owner Apple sign-in; not verified |
+
+Regressions include persisted bootstrap before authentication, offline/interrupted setup, secure-save failures, fresh installation with stale Keychain, strict refusal to replace damaged identities, preserved legacy state/frozen uploads, terminal revoked-auth failures, refresh rotation, App Check failure/timeouts, and the complete browser mock pipeline with zero network requests. Both storage paths retain SQLite version 5 and journal format 2. A small upload_bootstrap table records pending automatic identity; no workout history or prior upload revisions are rewritten.
+
+The owner native iOS Firebase app is registered. Its Apple team and one-hour production App Attest configuration are set; anonymous authentication is enabled, password authentication preserved, and anonymous auto-deletion disabled. Tested rules and index exemptions were deployed with automatic enrollment explicitly disabled. Firestore App Check enforcement remains unchanged until both phones demonstrate valid tokens. No real automatic enrollment, initial history upload, missing/invalid-token enforcement check, or former Google Sheets retirement is claimed.
+
+A noninteractive EAS attempt could not refresh the ad hoc profile because no App Store Connect API key is configured. The interactive attempt found the saved Apple session expired and stopped before password entry. The owner must run the build command in [the installation guide](INSTALL_IPHONE.md), sign in directly to Apple, and include both phones. Native SDK/binary size and device attestation remain pending; an iOS JavaScript export does not establish native compilation. Install over the existing app to preserve its local journal.
+
+A source/output marker scan found no owner private-key/ADC content; the native bundle contains neither the browser mock token nor owner ADC path. The public Firebase API key is intentionally part of the app configuration and is not an authorization secret. Dependency security maintenance remains deferred; npm reports 53 dependency findings (20 moderate, 33 high), not 53 confirmed reachable mobile vulnerabilities. Do not use forced dependency upgrades as part of this rollout.
+
 ## October 19 simplified interface
 
 Body-weight entry is available only in Settings; Analytics retains read-only charts and suggestions. Settings no longer contains portable backup, import, export, pre-migration-copy, or restore controls. Their screen handlers and redundant explanatory panels were removed. Weight-increment inputs start collapsed. Connected upload status stays visible, with rename, replacement, and disconnect behind Manage connection.

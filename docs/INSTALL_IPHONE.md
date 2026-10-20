@@ -2,16 +2,16 @@
 
 The `preview` profile creates a standalone private iPhone app with its JavaScript and assets bundled. After installation, recording and analytics work offline with your Windows PC switched off. This is an EAS internal distribution build. [Expo's preview-build guide](https://docs.expo.dev/tutorial/eas/internal-distribution-builds/)
 
-These instructions are prepared for the owner to run. No Apple account has been enrolled, no device has been registered, and no signed iOS build has been installed as part of writing this guide. Optional Firestore setup is separate from Apple signing; app users paste private codes and do not see a Google sign-in screen.
+This release adds native Firebase App Check with production App Attest. **Both phones need a new native installation; OTA cannot add these modules. Install over Workout using the same Apple team and bundle identifier to retain local history. Do not uninstall.**
 
-The app uses native `expo-secure-store`, `expo-crypto`, and `expo-updates`. Install a new EAS binary if the phone's current build lacks any of these modules or has a different runtime fingerprint. An over-the-air JavaScript update cannot add a missing native module. [Expo native rebuild guidance](https://docs.expo.dev/develop/development-builds/introduction/#rebuild-when-native-code-changes)
+The app automatically identifies installations using the model and a stable suffix. No phone code, account sign-in, or database controls appear in Settings. Existing connected installations keep their private identity and queued history. The browser uses a local mock only.
 
 ## 1. Accounts and prerequisites
 
 - Your iPhone must run **iOS 16.4 or newer**.
 - Use an Expo account and an active Apple Developer Program membership. Apple lists **US $99 per membership year**, with regional pricing. You complete enrollment, payment, Apple sign-in, and two-factor prompts yourself. [Apple enrollment](https://developer.apple.com/programs/enroll/)
 - EAS builds run in Expo's cloud. Build availability, quotas, and paid options depend on your account; check before starting a build. [EAS build setup](https://docs.expo.dev/build/setup/)
-- Install Node.js 22.18 or a newer supported LTS release and Git for Windows if needed. Keep Apple passwords, codes, certificates, and provisioning files out of source control and chat messages.
+- Install Node.js 24.12.0 or newer compatible 24.x LTS release and Git for Windows if needed. Keep Apple passwords, codes, certificates, and provisioning files out of source control and chat messages.
 
 ## 2. Prepare and link the project
 
@@ -25,10 +25,10 @@ npm run lint
 npm test
 npx expo-doctor
 npx eas-cli@latest login
-npx eas-cli@latest init
+npx eas-cli@latest project:info
 ```
 
-Select your own Expo account/project when prompted. `init` links the folder to your EAS project and records its project ID. Keep that configuration for future builds. Before the first build, review `expo.ios.bundleIdentifier` in `app.json`; use a stable identifier you own, for example `com.yourname.workout`. If Apple reports that the identifier is taken, change it before installing your first build. Keep it unchanged for later updates.
+This repository is already linked to the owner's EAS project. Keep that project, Apple team, and `com.chopton.workout.personal` bundle identifier unchanged so installing updates preserves app data.
 
 The October 15 compatibility check reports two deferred SDK patch updates: `expo` 57.0.29 to expected 57.0.30, and `expo-router` 57.0.27 to expected 57.0.28. Expo Doctor passes 20 of 21 checks with that warning visible. Follow the [dependency maintenance brief](DEFERRED_WORK.md#dependency-security-maintenance) before claiming a clean dependency check.
 
@@ -46,7 +46,7 @@ Choose the website registration method and open its URL/QR code on your iPhone. 
 npx eas-cli@latest build --platform ios --profile preview
 ```
 
-Sign in to Apple yourself when prompted, select your developer team, allow EAS to generate/manage signing credentials, and include your registered iPhone in the provisioning profile. Follow the build link to see progress. Registration alone does not make an old build installable on a new phone. [Expo internal distribution](https://docs.expo.dev/build/internal-distribution/)
+Sign in to Apple yourself when prompted, select your developer team, allow EAS to generate/manage signing credentials, and include **both registered iPhones** in the provisioning profile. Follow the build link to see progress. Registration alone does not make an old build installable on a new phone. [Expo internal distribution](https://docs.expo.dev/build/internal-distribution/)
 
 ## 4. Install and enable Developer Mode
 
@@ -56,17 +56,13 @@ If prompted, open **Settings > Privacy & Security > Developer Mode**, turn it on
 
 Stop the PC's development server and test Workout in airplane mode. Create a plan, record values, wait for **Saved**, force-close, and reopen. Finish the [device checklist](DEVICE_CHECKLIST.md).
 
-## Optional private Firestore connection
+## Automatic private uploads and staged rollout
 
-Follow [Private Firestore uploads](FIREBASE.md). The owner configures Firebase Authentication, deploys the upload-only rules, and issues separate private codes for the two authorized phones. The project is ready on Spark without billing in `us-central1`: device authentication, rules, indexes, and two private codes are provisioned, and synthetic live REST verification passed. Each installed iPhone still needs its first connection and device acceptance checks. Keep real codes and cloud/account identifiers outside source files.
+The owner follows [Firestore setup](FIREBASE.md). Public Firebase configuration is bundled; anonymous refresh tokens stay in device-only Keychain storage. Settings shows a read-only upload status and explains that data uploads to the owner's private database. Local **Saved** remains independent.
 
-In Workout's **Settings > Database uploads**, choose **Connect Database**, paste that phone's private code, set a recognizable phone label, review the profile and full-history upload explanation, and explicitly consent. There is no account sign-in screen for app users. Credentials are not part of the EAS build, app bundle, or public environment variables.
+Before enabling automatic enrollment, install the App Check build on both phones and open each online. Verify production App Attest tokens in Firebase App Check metrics. Then enforce App Check for Firestore, verify missing/invalid tokens are rejected by the real service, and run the documented owner command to enable enrollment. Until that sequence finishes, a new installation can record locally while uploads wait. Do not enforce App Check while either phone still needs the old binary for uploads.
 
-Connecting binds this installation to its upload generation before uploading records. Settings shows upload status, pending records, last upload, and incomplete-history notices. **Manage connection** reveals rename, replacement-code, and disconnect controls. Recording and analytics work offline; pending changes retry while the app is open. **Saved** confirms local durability, while **Up to date** describes uploads.
-
-Complete the live Firebase and two-phone checks in the [device checklist](DEVICE_CHECKLIST.md). The browser demo does not contact Firebase. Firestore is an upload-only reporting copy for owner analysis. The app never reads or restores cloud history, and a new installation starts with a fresh local journal.
-
-Before upgrading an existing installation to SQLite schema version 5, the native app preserves a validated journal copy in its original schema in private storage. This automatic migration safeguard remains internal; there is no in-app export or recovery control.
+After enabling, keep each phone open online until the initial history finishes. Verify separate UID namespaces, the completion marker, and a subsequent incremental edit from both phones in the owner console. All client reads stay denied. Firestore is an owner reporting copy; it never restores app data.
 
 ## Verify this release
 
@@ -98,7 +94,7 @@ For the second person, run `device:create` for their iPhone, then create a new p
 npx eas-cli@latest build:resign --platform ios
 ```
 
-Give them that newly signed build's installation link. Their journal starts empty and stays separate. If both phones upload to Firestore, the owner must issue a different device code and phone label for each; never copy one phone's code to the other. A replacement installation needs a fresh upload generation and starts locally fresh; previous cloud records remain available only to owner analysis. Internal build links can allow access without an Expo login by default; change this in the project's Expo settings if desired. Newly enrolled/renewed Apple accounts can encounter Apple's 24–72-hour processing delay for a new device; rebuild/re-sign after it clears. [Device registration and access](https://docs.expo.dev/build/internal-distribution/)
+Give them that newly signed build's installation link. Their journal starts empty and stays separate. Each new installation automatically creates its own account and namespace. No codes are shared. Reinstalling starts a fresh local journal and identity; previous cloud records remain available only to owner analysis. Internal build links can allow access without an Expo login by default; change this in the project's Expo settings if desired. Newly enrolled/renewed Apple accounts can encounter Apple's 24–72-hour processing delay for a new device; rebuild/re-sign after it clears. [Device registration and access](https://docs.expo.dev/build/internal-distribution/)
 
 ## Development preview and troubleshooting
 
@@ -111,6 +107,6 @@ npx expo start --dev-client
 
 A development build uses a running development server; use `preview` for everyday standalone use. Expo Go is a separate development app and must support this project's SDK 57 and native modules. It does not prove that the standalone app's deployment target or signing works. [Expo development environments](https://docs.expo.dev/get-started/set-up-your-environment/)
 
-If experimenting with Expo Go on an iPhone, sign into the same Expo account in both Expo Go and the local CLI (`npx expo login`). Connect PC and phone to the same Wi-Fi; a tunnel (`npx expo start --tunnel`) can help on restrictive networks. [Expo device connection guide](https://docs.expo.dev/get-started/start-developing/)
+Expo Go cannot load this app's native Firebase modules. Use a development build or the standalone preview build. Production App Attest requires a physical device; do not add debug tokens to production configuration.
 
 If installation fails, check iOS version, selected UDID, Developer Mode, Apple device-processing status, and signing expiry. If the app asks for a development server, install a `preview` build. Keep the existing installation when troubleshooting so its local data remains available.

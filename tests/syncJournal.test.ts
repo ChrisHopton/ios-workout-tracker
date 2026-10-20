@@ -403,3 +403,60 @@ test("disconnect clears abandoned enrollment but keeps local queue and frozen up
     assert.equal(await reopened.sync.pendingEnrollment(), null);
   } finally { sql.close(); }
 });
+
+
+const bootstrapDraft = { version: 1 as const, ...identity, installationId: nonce, label: "iPhone · 000003" };
+test("automatic draft survives restart and activation uploads all local history", async () => {
+  const sql = sqliteHarness();
+  try {
+    const store = createJournalStorage(sql.db); await store.load();
+    const history = historyFixture(2); await store.write(history);
+    assert.deepEqual(await store.sync.prepareBootstrap(bootstrapDraft), bootstrapDraft);
+    const reopened = createJournalStorage(sql.db); await reopened.load();
+    assert.deepEqual(await reopened.sync.prepareBootstrap({ ...bootstrapDraft, label: "Different model" }), bootstrapDraft);
+    const automatic = { ...identity, layout: "automatic" as const, uid: "anonymous_phone" };
+    const staged = await reopened.sync.prepareEnrollment(automatic, bootstrapDraft.label, nonce);
+    await reopened.sync.activateEnrollment(staged);
+    assert.equal(sql.native.prepare("SELECT COUNT(*) AS n FROM upload_bootstrap").get()!.n, 0);
+    assert.equal((await reopened.sync.state())!.layout, "automatic");
+    assert.ok(await reopened.sync.pendingCount() > 2);
+    assert.deepEqual(await reopened.load(), history);
+    const frozen = await reopened.sync.inFlight();
+    const again = createJournalStorage(sql.db); await again.load();
+    assert.deepEqual(await again.sync.inFlight(), frozen);
+  } finally { sql.close(); }
+});
+test("orphaned or corrupt upload state cannot bootstrap a replacement account", async () => {
+  for (const damage of [
+    "UPDATE upload_sequence SET counter = 2",
+    "INSERT INTO upload_inflight VALUES (1, '{}')",
+    "INSERT INTO upload_state VALUES (1, '{}')",
+    "INSERT INTO upload_enrollment VALUES (1, '{}')",
+    "INSERT INTO upload_bootstrap VALUES (1, '{}')",
+  ]) {
+    const sql = sqliteHarness();
+    try {
+      const store = createJournalStorage(sql.db); await store.load();
+      sql.native.exec(damage);
+      await assert.rejects(store.sync.prepareBootstrap(bootstrapDraft));
+      assert.equal(await store.sync.pendingCount(), 0);
+      const local = historyFixture(1); await store.write(local);
+      assert.deepEqual(await store.load(), local);
+    } finally { sql.close(); }
+  }
+});
+test("bootstrap transaction and read failures leave no partially reserved identity", async () => {
+  const sql = sqliteHarness();
+  try {
+    const store = createJournalStorage(sql.db); await store.load();
+    failStateReadOnce(sql);
+    await assert.rejects(store.sync.prepareBootstrap(bootstrapDraft), /read failure/);
+    assert.equal(sql.native.prepare("SELECT COUNT(*) AS n FROM upload_bootstrap").get()!.n, 0);
+    sql.failNext(1);
+    await assert.rejects(store.sync.prepareBootstrap(bootstrapDraft), /disk failure/);
+    assert.equal(sql.native.prepare("SELECT COUNT(*) AS n FROM upload_bootstrap").get()!.n, 0);
+    assert.deepEqual(await store.sync.prepareBootstrap(bootstrapDraft), bootstrapDraft);
+    sql.native.exec("UPDATE upload_sequence SET counter = 7");
+    await assert.rejects(store.sync.prepareBootstrap(bootstrapDraft), /repair/);
+  } finally { sql.close(); }
+});

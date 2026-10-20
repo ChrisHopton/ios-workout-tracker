@@ -1,6 +1,7 @@
 import { preserveMigrationBackup } from "./backupIO";
 import { openDatabaseAsync } from "expo-sqlite";
 import type { AppData } from "../domain/types";
+import type { BootstrapDraft } from "../sync/bootstrap";
 import type { SyncIdentity } from "../sync/protocol";
 import type { SyncLocalState } from "../sync/controller";
 import { createRetryableResource } from "./retryableResource";
@@ -12,6 +13,7 @@ const getStorage = createRetryableResource(async () =>
 export async function loadData(): Promise<AppData> { return (await getStorage()).load(); }
 export async function writeData(data: AppData): Promise<void> { await (await getStorage()).write(data); }
 export const syncRepository = {
+  prepareBootstrap: async (draft: BootstrapDraft) => (await getStorage()).sync.prepareBootstrap(draft),
   state: async () => (await getStorage()).sync.state(),
   pendingEnrollment: async () => (await getStorage()).sync.pendingEnrollment(),
   prepareEnrollment: async (identity: SyncIdentity, label: string, installationId: string) =>

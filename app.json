@@ -13,7 +13,11 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       },
-      "deploymentTarget": "16.4"
+      "deploymentTarget": "16.4",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "entitlements": {
+        "com.apple.developer.devicecheck.appattest-environment": "production"
+      }
     },
     "plugins": [
       "expo-router",
@@ -25,12 +29,36 @@
       ],
       "expo-document-picker",
       "expo-sharing",
-      "expo-secure-store"
+      "expo-secure-store",
+      "@react-native-firebase/app",
+      "@react-native-firebase/app-check",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "dynamic"
+          }
+        }
+      ]
     ],
     "web": {
       "bundler": "metro",
       "output": "single",
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c1483680-1142-4c99-8684-4dea8fa3fa9d"
+      }
+    },
+    "owner": "chrishopton",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/c1483680-1142-4c99-8684-4dea8fa3fa9d"
+    },
+    "android": {}
   }
 }

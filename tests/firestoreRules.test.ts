@@ -166,6 +166,151 @@ test("Firestore rules deny client reads and isolate authenticated upload namespa
         assert.equal(result.docs[0].data().payload.title, "Literal = text");
       });
     });
+    const automaticUid = "automatic-phone-a";
+    const otherAutomaticUid = "automatic-phone-b";
+    const automaticA = environment.authenticatedContext(automaticUid, { firebase: { sign_in_provider: "anonymous", identities: {} } }).firestore();
+    const automaticB = environment.authenticatedContext(otherAutomaticUid, { firebase: { sign_in_provider: "anonymous", identities: {} } }).firestore();
+    const automaticRoot = "automaticUploads/" + automaticUid;
+    const automaticRecords = automaticRoot + "/records";
+    const automaticBinding = () => ({ ...binding(), schemaVersion: 2, enabled: true });
+    const enrollmentControl = "uploadControl/automaticEnrollment";
+    async function gate(enabled: boolean) {
+      await environment.withSecurityRulesDisabled(async (context) => { await context.firestore().doc(enrollmentControl).set({ enabled }); });
+    }
+    async function enrollAutomatic() {
+      await gate(true);
+      await assertSucceeds(automaticA.doc(automaticRoot).set(automaticBinding()));
+    }
+    await t.test("automatic creation fails closed until owner enrollment gate opens and requires own anonymous UID", async () => {
+      await assertFails(automaticA.doc(automaticRoot).set(automaticBinding()));
+      await gate(false);
+      await assertFails(automaticA.doc(automaticRoot).set(automaticBinding()));
+      await gate(true);
+      await assertFails(automaticB.doc(automaticRoot).set(automaticBinding()));
+      await assertFails(unsigned.doc(automaticRoot).set(automaticBinding()));
+      const passwordPhone = environment.authenticatedContext("password-phone", { firebase: { sign_in_provider: "password", identities: {} } }).firestore();
+      await assertFails(passwordPhone.doc("automaticUploads/password-phone").set(automaticBinding()));
+      for (const invalid of [
+        { ...automaticBinding(), enabled: false }, { ...automaticBinding(), schemaVersion: 1 },
+        { ...automaticBinding(), deviceId: "invalid" }, { ...automaticBinding(), generationId: "invalid" },
+        { ...automaticBinding(), installationId: "invalid" }, { ...automaticBinding(), extra: true },
+      ]) await assertFails(automaticA.doc(automaticRoot).set(invalid));
+      await assertSucceeds(automaticA.doc(automaticRoot).set(automaticBinding()));
+    });
+    await t.test("automatic binding retries remain exact and succeed after new enrollment is disabled", async () => {
+      await enrollAutomatic();
+      await gate(false);
+      await assertSucceeds(automaticA.doc(automaticRoot).set(automaticBinding()));
+      const value = record();
+      await assertSucceeds(automaticA.doc(automaticRecords + "/" + value.key).set(value));
+      await assertFails(automaticB.doc("automaticUploads/" + otherAutomaticUid).set(automaticBinding()));
+      await environment.withSecurityRulesDisabled(async (context) => { await context.firestore().doc(enrollmentControl).delete(); });
+      await assertSucceeds(automaticA.doc(automaticRoot).set(automaticBinding()));
+      for (const changed of [
+        { ...automaticBinding(), deviceId: DEVICE_B }, { ...automaticBinding(), generationId: GENERATION_B },
+        { ...automaticBinding(), installationId: INSTALLATION_B }, { ...automaticBinding(), enabled: false },
+        { ...automaticBinding(), alias: "New alias" },
+      ]) await assertFails(automaticA.doc(automaticRoot).set(changed));
+      await assertFails(automaticA.doc(automaticRoot).delete());
+      await assertSucceeds(phoneA.doc(root).set(binding()));
+    });
+    await t.test("UID-scoped automatic namespaces remain isolated with identical UUIDs and no first-two cap", async () => {
+      await enrollAutomatic();
+      const third = environment.authenticatedContext("automatic-phone-c", { firebase: { sign_in_provider: "anonymous", identities: {} } }).firestore();
+      await assertSucceeds(automaticB.doc("automaticUploads/" + otherAutomaticUid).set(automaticBinding()));
+      await assertSucceeds(third.doc("automaticUploads/automatic-phone-c").set(automaticBinding()));
+      const value = record();
+      await assertSucceeds(automaticA.doc(automaticRecords + "/" + value.key).set(value));
+      await assertSucceeds(automaticB.doc("automaticUploads/" + otherAutomaticUid + "/records/" + value.key).set({ ...value, payload: { separate: true } }));
+      await assertFails(automaticB.doc(automaticRecords + "/" + value.key).set({ ...value, revision: 2 }));
+      await assertFails(automaticB.doc(automaticRoot).set(automaticBinding()));
+      await assertFails(automaticA.doc(records + "/" + value.key).set(value));
+      await assertFails(phoneA.doc(automaticRecords + "/" + value.key).set(value));
+    });
+    await t.test("automatic clients cannot read their data or administer enrollment and owner aliases", async () => {
+      await enrollAutomatic();
+      const value = record();
+      await assertSucceeds(automaticA.doc(automaticRecords + "/" + value.key).set(value));
+      for (const client of [automaticA, automaticB, unsigned]) {
+        for (const path of [automaticRoot, automaticRecords + "/" + value.key, enrollmentControl, "uploadOwnerMetadata/automatic:" + automaticUid]) {
+          await assertFails(client.doc(path).get({ source: "server" }));
+        }
+        await assertFails(client.collection("automaticUploads").get({ source: "server" }));
+        await assertFails(client.collection(automaticRecords).get({ source: "server" }));
+        await assertFails(client.doc(enrollmentControl).set({ enabled: true }));
+        await assertFails(client.doc("uploadOwnerMetadata/automatic:" + automaticUid).set({ alias: "Owner" }));
+      }
+    });
+    await t.test("automatic records require prior binding and every bound identity field", async () => {
+      await gate(true);
+      const value = record();
+      const path = automaticRecords + "/" + value.key;
+      await assertFails(automaticA.doc(path).set(value));
+      const together = automaticA.batch();
+      together.set(automaticA.doc(automaticRoot), automaticBinding());
+      together.set(automaticA.doc(path), value);
+      await assertFails(together.commit());
+      await assertSucceeds(automaticA.doc(automaticRoot).set(automaticBinding()));
+      for (const changed of [
+        { ...value, deviceId: DEVICE_B }, { ...value, generationId: GENERATION_B },
+        { ...value, installationId: INSTALLATION_B }, { ...value, revision: 0 },
+        { ...value, deleted: true }, { ...value, schemaVersion: 2 }, { ...value, extra: true },
+      ]) await assertFails(automaticA.doc(path).set(changed));
+      await assertSucceeds(automaticA.doc(path).set(value));
+      for (const kind of UPLOAD_KINDS) {
+        const next = kind === "completion" ? { ...value, key: "completion", kind, payload: { initialUploadComplete: true } } : record(1, kind, kind);
+        await assertSucceeds(automaticA.doc(automaticRecords + "/" + next.key).set(next));
+      }
+      await assertFails(automaticA.doc(path).delete());
+    });
+    await t.test("automatic exact retries monotonic revisions and tombstones preserve existing records", async () => {
+      await enrollAutomatic();
+      const value = record(3);
+      const ref = automaticA.doc(automaticRecords + "/" + value.key);
+      await assertSucceeds(ref.set(value));
+      await assertSucceeds(ref.set(value));
+      await assertFails(ref.set({ ...value, payload: { changed: true } }));
+      await assertFails(ref.set({ ...value, revision: 2 }));
+      const deleted = { ...value, revision: 4, deleted: true, payload: {} };
+      await assertSucceeds(ref.set(deleted));
+      await assertSucceeds(ref.set(deleted));
+      await assertFails(ref.set(value));
+    });
+    await t.test("revoked automatic roots reject writes and cannot be deleted or reenabled by the same account", async () => {
+      await enrollAutomatic();
+      const value = record();
+      await assertSucceeds(automaticA.doc(automaticRecords + "/" + value.key).set(value));
+      await environment.withSecurityRulesDisabled(async (context) => { await context.firestore().doc(automaticRoot).update({ enabled: false }); });
+      await assertFails(automaticA.doc(automaticRecords + "/" + value.key).set(value));
+      await assertFails(automaticA.doc(automaticRoot).set(automaticBinding()));
+      await assertFails(automaticA.doc(automaticRoot).set({ ...automaticBinding(), enabled: false }));
+      await assertFails(automaticA.doc(automaticRoot).delete());
+      await environment.withSecurityRulesDisabled(async (context) => {
+        assert.equal((await context.firestore().doc(automaticRoot).get()).data()?.enabled, false);
+        assert.equal((await context.firestore().doc(automaticRecords + "/" + value.key).get()).exists, true);
+      });
+    });
+    await t.test("ten automatic records atomically retry and a denied batch retains neither write", async () => {
+      await enrollAutomatic();
+      for (let retry = 0; retry < 2; retry++) {
+        const batch = automaticA.batch();
+        for (let index = 0; index < 10; index++) {
+          const value = record(1, String(index));
+          batch.set(automaticA.doc(automaticRecords + "/" + value.key), value);
+        }
+        await assertSucceeds(batch.commit());
+      }
+      const allowed = record(1, "batch-allowed");
+      const denied = { ...record(1, "batch-denied"), installationId: INSTALLATION_B };
+      const batch = automaticA.batch();
+      batch.set(automaticA.doc(automaticRecords + "/" + allowed.key), allowed);
+      batch.set(automaticA.doc(automaticRecords + "/" + denied.key), denied);
+      await assertFails(batch.commit());
+      await environment.withSecurityRulesDisabled(async (context) => {
+        assert.equal((await context.firestore().doc(automaticRecords + "/" + allowed.key).get()).exists, false);
+        assert.equal((await context.firestore().collection(automaticRecords).get()).size, 10);
+      });
+    });
   } finally { await environment.cleanup(); }
 });
 

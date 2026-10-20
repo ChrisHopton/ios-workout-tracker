@@ -1,3 +1,4 @@
+import { documentRoot, identityOf, sameIdentity, type SyncIdentity } from "./protocol";
 import { makeCommitBody, SyncError, type SyncTransport } from "./transport";
 
 function canonical(value: unknown): string {
@@ -13,28 +14,29 @@ function canonical(value: unknown): string {
 }
 
 export function createPreviewTransport(): SyncTransport {
-  const bindings = new Map<string, string>();
+  const bindings = new Map<string, { installationId: string; identity: SyncIdentity }>();
   const records = new Map<string, { revision: number; value: string }>();
   return async (request, credentials, canSend = () => true) => {
     makeCommitBody(request, credentials);
     if (!canSend()) throw new SyncError("Cloud preview upload paused.", true);
-    const namespace = `${credentials.projectId}:${credentials.deviceId}:${credentials.generationId}`;
+    const namespace = documentRoot(credentials);
+    const identity = identityOf(credentials);
+    const binding = bindings.get(namespace);
     if (request.action === "bind") {
-      const installation = bindings.get(namespace);
-      if (installation !== undefined && installation !== request.installationId) {
-        throw new SyncError("This preview code is already bound to another installation.", false, "auth");
+      if (binding && (binding.installationId !== request.installationId || !sameIdentity(binding.identity, identity))) {
+        throw new SyncError("This preview is already bound to another installation or identity.", false, "auth");
       }
-      bindings.set(namespace, request.installationId);
+      bindings.set(namespace, { installationId: request.installationId, identity });
       return { acknowledged: [] };
     }
-    if (bindings.get(namespace) !== request.installationId) {
+    if (!binding || binding.installationId !== request.installationId || !sameIdentity(binding.identity, identity)) {
       throw new SyncError("Connect this preview installation before uploading.", false, "auth");
     }
     for (const change of request.changes) {
       const previous = records.get(`${namespace}:${change.key}`);
       if (previous && (previous.revision > change.revision ||
         (previous.revision === change.revision && previous.value !== canonical(change)))) {
-        throw new SyncError("This preview revision is stale or changed. Replace the connection code.", false, "auth");
+        throw new SyncError("This preview revision is stale or changed. Reload the browser demo.", false, "auth");
       }
     }
     for (const change of request.changes) {

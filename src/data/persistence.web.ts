@@ -1,9 +1,10 @@
+import { validateBootstrap, type BootstrapDraft } from "../sync/bootstrap";
 import type { AppData } from "../domain/types";
 import { initialData } from "../domain/library";
 import { upgradeData } from "../domain/backup";
 import { changedRows, makeProfileDocument, makeCompletionDocument, projectData } from "../sync/projection";
 import type { SyncLocalState, SyncRepository } from "../sync/controller";
-import { makeBatch, type DocumentChange, type UploadBatch, type SyncIdentity, type UploadDocument } from "../sync/protocol";
+import { makeBatch, sameIdentity, type DocumentChange, type UploadBatch, type UploadDocument } from "../sync/protocol";
 
 let syncState: SyncLocalState | null = null;
 let staging: SyncLocalState | null = null;
@@ -12,9 +13,8 @@ let frozen: UploadBatch | null = null;
 const outbox = new Map<string, DocumentChange>();
 const known = new Map<string, UploadDocument>();
 const key = "workout-browser-preview-v1";
-function same(a: SyncIdentity | null, b: SyncIdentity) {
-  return !!a && a.projectId === b.projectId && a.deviceId === b.deviceId && a.generationId === b.generationId;
-}
+const same = sameIdentity;
+let bootstrap: BootstrapDraft | null = null;
 export async function loadData(): Promise<AppData> {
   const value = localStorage.getItem(key);
   priorData = value ? upgradeData(JSON.parse(value)) : initialData();
@@ -36,6 +36,7 @@ export async function writeData(data: AppData): Promise<void> {
   priorData = data;
 }
 export const syncRepository: SyncRepository = {
+  prepareBootstrap: async (candidate) => { bootstrap ??= validateBootstrap(candidate); return { ...bootstrap }; },
   state: async () => syncState ? { ...syncState } : null,
   pendingEnrollment: async () => staging ? { ...staging } : null,
   prepareEnrollment: async (identity, label, installationId) => {
@@ -49,6 +50,7 @@ export const syncRepository: SyncRepository = {
     const enabled = syncState?.enabled;
     syncState = { ...(retained ? syncState! : candidate), label: candidate.label, enabled: true, bound: true };
     staging = null;
+    bootstrap = null;
     if (!retained) { outbox.clear(); known.clear(); frozen = null; }
     if (!retained || !enabled) {
       const revision = ++syncState.clock;

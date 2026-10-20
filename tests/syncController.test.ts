@@ -5,11 +5,11 @@ import {
   type SyncRepository, type SyncSecrets,
 } from "../src/sync/controller";
 import {
-  makeCommitBody, SyncError, type SyncRequest, type SyncTransport,
+  createSyncTransport, makeCommitBody, SyncError, type SyncRequest, type SyncTransport,
 } from "../src/sync/transport";
 import {
   makeBatch, makeDocumentKey, type CommitReceipt, type DocumentChange,
-  type SyncCredentials, type SyncIdentity, type UploadBatch,
+  type LegacySyncCredentials, type SyncCredentials, type SyncIdentity, type UploadBatch,
 } from "../src/sync/protocol";
 import { createPreviewTransport } from "../src/sync/previewTransport";
 
@@ -17,7 +17,7 @@ const DEVICE = "11111111-1111-4111-8111-111111111111";
 const GENERATION = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION = "33333333-3333-4333-8333-333333333333";
 const OTHER_INSTALLATION = "44444444-4444-4444-8444-444444444444";
-const CREDENTIALS: SyncCredentials = {
+const CREDENTIALS: LegacySyncCredentials = {
   version: 1, projectId: "workout-test", apiKey: "a".repeat(39),
   deviceId: DEVICE, generationId: GENERATION, uid: "phone_one",
   email: "phone-one@example.com", password: "private-test-password",
@@ -190,6 +190,8 @@ test("restarts replay the exact frozen batch before a newer coalesced edit", asy
   const bodies: string[] = [];
   const app = setup(async (request, credentials) => {
     bodies.push(makeCommitBody(request, credentials));
+    assert.equal(credentials.version, 1);
+    if (credentials.version !== 1) throw new Error("Expected legacy credentials");
     throw new Error(`Network failed ${credentials.password} ${credentials.email}`);
   });
   app.repository.put(change());
@@ -578,7 +580,7 @@ test("missing or mismatched saved identities never silently create a writer gene
     await app.time.advance(600_000);
     assert.equal(calls, 0);
     assert.equal(app.controller.getSnapshot().status, "disconnected");
-    assert.match(app.controller.getSnapshot().error!, /replacement/);
+    assert.match(app.controller.getSnapshot().error!, /identity needs attention/);
     app.controller.dispose();
   }
 });
@@ -849,6 +851,101 @@ test("initial completion stays false until its separate frozen marker is acknowl
   failCompletion = false;
   await app.controller.syncNow();
   assert.equal(app.controller.getSnapshot().initialComplete, true);
+  assert.equal(app.controller.getSnapshot().status, "synced");
+  app.controller.dispose();
+});
+
+
+test("startup read failures retry initialization without replacing credentials or frozen uploads", async () => {
+  const requests: SyncRequest[] = [];
+  const app = setup(async (request) => { requests.push(request); return success(request); });
+  app.repository.put(change());
+  const frozen = await app.repository.inFlight();
+  const read = app.repository.state.bind(app.repository);
+  let reads = 0;
+  app.repository.state = async () => { if (++reads === 1) throw new Error("disk busy"); return read(); };
+  assert.equal(await app.controller.initialize(), false);
+  assert.equal(requests.length, 0);
+  assert.deepEqual(await app.repository.inFlight(), frozen);
+  assert.equal(await app.controller.initialize(), true);
+  await app.controller.syncNow();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].action, "upload");
+  if (requests[0].action === "upload") assert.deepEqual(requests[0].changes, frozen!.changes);
+  assert.equal(app.repository.local!.generationId, GENERATION);
+  app.controller.dispose();
+});
+
+test("revoked staged automatic credentials stop after one authentication attempt without recreation", async () => {
+  for (const reason of ["USER_DISABLED", "INVALID_REFRESH_TOKEN", "TOKEN_EXPIRED"]) {
+    const urls: string[] = [];
+    const transport = createSyncTransport((async (input) => {
+      urls.push(String(input));
+      return Response.json({ error: { message: reason } }, { status: 400 });
+    }) as typeof fetch);
+    const app = setup(transport);
+    const credentials: SyncCredentials = {
+      version: 2, layout: "automatic", projectId: CREDENTIALS.projectId, apiKey: CREDENTIALS.apiKey,
+      deviceId: DEVICE, generationId: GENERATION, uid: "staged_anonymous", refreshToken: "saved-refresh-secret",
+    };
+    app.repository.staged = {
+      ...app.repository.local!, layout: "automatic", uid: credentials.uid,
+      enabled: false, bound: false, initialComplete: false,
+    };
+    app.repository.local = null;
+    app.secrets.saved = credentials;
+    const staged = structuredClone(app.repository.staged);
+    assert.equal(await app.controller.initialize(), true);
+    await assert.rejects(app.controller.syncNow(), (error: unknown) =>
+      error instanceof SyncError && error.kind === "auth" && !error.retryable);
+    app.controller.changed(true);
+    app.controller.setActive(false);
+    app.controller.setActive(true);
+    await app.time.advance(600_000);
+    assert.equal(urls.length, 1);
+    assert.ok(urls[0].includes("securetoken.googleapis.com"));
+    assert.equal(app.repository.reservations.length, 1);
+    assert.equal(app.time.jobs.size, 0);
+    assert.equal(app.repository.local, null);
+    assert.deepEqual(app.repository.staged, staged);
+    assert.deepEqual(app.secrets.saved, credentials);
+    assert.equal(app.secrets.saves, 0);
+    assert.equal(app.controller.getSnapshot().status, "error");
+    app.controller.dispose();
+  }
+});
+
+test("temporary automatic enrollment denial retries the same staged identity and binding", async () => {
+  const requests: SyncRequest[] = [];
+  let allowed = false;
+  const app = setup(async (request) => {
+    requests.push(structuredClone(request));
+    if (request.action === "bind" && !allowed) throw new SyncError("Enrollment is pending.", true, "enrollment");
+    return success(request);
+  });
+  app.repository.staged = {
+    ...app.repository.local!, layout: "automatic", uid: "staged_anonymous",
+    enabled: false, bound: false, initialComplete: false,
+  };
+  app.repository.local = null;
+  app.secrets.saved = {
+    version: 2, layout: "automatic", projectId: CREDENTIALS.projectId, apiKey: CREDENTIALS.apiKey,
+    deviceId: DEVICE, generationId: GENERATION, uid: "staged_anonymous", refreshToken: "saved-refresh-secret",
+  };
+  const credentials = structuredClone(app.secrets.saved);
+  await app.controller.initialize();
+  await assert.rejects(app.controller.syncNow(), (error: unknown) =>
+    error instanceof SyncError && error.kind === "enrollment" && error.retryable);
+  assert.equal(requests.length, 1);
+  allowed = true;
+  await app.time.advance(15_000);
+  assert.deepEqual(requests.filter((request) => request.action === "bind"), [
+    { action: "bind", installationId: INSTALLATION }, { action: "bind", installationId: INSTALLATION },
+  ]);
+  assert.deepEqual(app.secrets.saved, credentials);
+  assert.equal(app.secrets.saves, 0);
+  assert.equal(app.repository.staged, null);
+  assert.equal(app.repository.local!.uid, "staged_anonymous");
   assert.equal(app.controller.getSnapshot().status, "synced");
   app.controller.dispose();
 });

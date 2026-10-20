@@ -3,17 +3,18 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, realpathSync, wr
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateCredentials, type SyncCredentials } from "../src/sync/protocol";
+import { validateCredentials, type LegacySyncCredentials } from "../src/sync/protocol";
+import { createAutomaticOwnerBackend, isAutomaticOwnerAction, OwnerManagementError, parseAutomaticOwnerArguments, runAutomaticOwnerCommand } from "./firebaseAutomatic";
 
 export type Authorization = { enabled: boolean; deviceId: string; generationId: string };
 export type PrivateDevice = { uid: string; deviceId: string; generationId: string; email: string; connectionCode: string };
 export type PrivateSetup = { version: 1; createdAt: string; projectId: string; devices: PrivateDevice[] };
 export interface OwnerBackend {
-  createUser(credentials: SyncCredentials): Promise<void>;
+  createUser(credentials: LegacySyncCredentials): Promise<void>;
   deleteUser(uid: string): Promise<void>;
   disableUser(uid: string): Promise<void>;
   getAuthorization(uid: string): Promise<Authorization | null>;
-  publish(credentials: SyncCredentials[], previous?: { uid: string; expected: Authorization }): Promise<void>;
+  publish(credentials: LegacySyncCredentials[], previous?: { uid: string; expected: Authorization }): Promise<void>;
   revoke(uid: string): Promise<void>;
 }
 const PROJECT = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
@@ -26,7 +27,7 @@ export function validateProject(projectId: string, apiKey?: string) {
     throw new Error("Provide a valid Firebase project ID and public web API key");
   }
 }
-export function generateCredentials(projectId: string, apiKey: string, identity?: { deviceId: string; generationId: string }): SyncCredentials {
+export function generateCredentials(projectId: string, apiKey: string, identity?: { deviceId: string; generationId: string }): LegacySyncCredentials {
   validateProject(projectId, apiKey);
   if (identity && (!UUID.test(identity.deviceId) || !UUID.test(identity.generationId))) throw new Error("Invalid device or generation ID");
   const uid = randomUUID();
@@ -37,8 +38,12 @@ export function generateCredentials(projectId: string, apiKey: string, identity?
     uid, email: `phone-${uid}@workout.invalid`, password: randomBytes(32).toString("base64url"),
   };
 }
-export function setupBundle(credentials: SyncCredentials[]): PrivateSetup {
-  credentials = credentials.map(validateCredentials);
+export function setupBundle(credentials: LegacySyncCredentials[]): PrivateSetup {
+  credentials = credentials.map((value) => {
+    const checked = validateCredentials(value);
+    if (checked.version !== 1) throw new Error("Legacy account setup requires password credentials");
+    return checked;
+  });
   if (!credentials.length || credentials.length > 2 || credentials.some((value) => value.projectId !== credentials[0].projectId)) {
     throw new Error("Generate one or two devices in one project");
   }
@@ -81,7 +86,7 @@ export function reservePrivateOutput(repoRoot: string, requested: string, force 
 export function savePrivateSetup(output: string, bundle: PrivateSetup) {
   writeFileSync(output, `${JSON.stringify(bundle, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
-export async function provision(backend: OwnerBackend, credentials: SyncCredentials[], previous?: { uid: string; expected: Authorization }) {
+export async function provision(backend: OwnerBackend, credentials: LegacySyncCredentials[], previous?: { uid: string; expected: Authorization }) {
   const created: string[] = [];
   try {
     for (const credential of credentials) {
@@ -196,6 +201,13 @@ export async function runSetup(options: SetupArguments, backend: OwnerBackend, r
   return output;
 }
 export async function main(args = process.argv.slice(2)) {
+  if (isAutomaticOwnerAction(args[0])) {
+    const options = parseAutomaticOwnerArguments(args);
+    const owner = await createAutomaticOwnerBackend(options.projectId);
+    try { process.stdout.write(await runAutomaticOwnerCommand(options, owner.backend)); }
+    finally { await owner.close(); }
+    return;
+  }
   const options = parseSetupArguments([...args]);
   const owner = await ownerBackend(options.projectId);
   try {
@@ -204,8 +216,8 @@ export async function main(args = process.argv.slice(2)) {
   } finally { await owner.close(); }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  void main().catch(() => {
-    process.stderr.write("Owner setup did not complete inspect the local private file and Firebase console before retrying\n");
+  void main().catch((error: unknown) => {
+    process.stderr.write(error instanceof OwnerManagementError ? `${error.message}\n` : "Owner setup did not complete inspect the local private file and Firebase console before retrying\n");
     process.exitCode = 1;
   });
 }

@@ -3,6 +3,7 @@ import { initialData } from "../domain/library";
 import { AppData, WorkoutSession } from "../domain/types";
 import { snapshot } from "./snapshot";
 import { createSyncJournal } from "../sync/journal";
+import type { BootstrapDraft } from "../sync/bootstrap";
 import type { SyncIdentity } from "../sync/protocol";
 import type { SyncLocalState } from "../sync/controller";
 
@@ -173,6 +174,7 @@ export function createJournalStorage(db: JournalDatabase, options: { beforeMigra
   }
 
   const repository = {
+    prepareBootstrap: (draft: BootstrapDraft) => serial(() => sync.prepareBootstrap(draft)),
     state: () => serial(() => sync.state()),
     pendingEnrollment: () => serial(() => sync.pendingEnrollment()),
     prepareEnrollment: (identity: SyncIdentity, label: string, installationId: string) =>

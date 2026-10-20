@@ -1,5 +1,8 @@
+import type { BootstrapDraft } from "./bootstrap";
 import {
   parseConnectionCode,
+  sameIdentity,
+  identityOf,
   validateCredentials,
   type SyncCredentials,
   type SyncIdentity,
@@ -17,6 +20,7 @@ export interface SyncLocalState extends SyncIdentity {
   initialComplete: boolean;
 }
 export interface SyncRepository {
+  prepareBootstrap?(candidate: BootstrapDraft): Promise<BootstrapDraft>;
   state(): Promise<SyncLocalState | null>;
   pendingEnrollment(): Promise<SyncLocalState | null>;
   prepareEnrollment(identity: SyncIdentity, label: string, installationId: string): Promise<SyncLocalState>;
@@ -66,17 +70,14 @@ function checkedLabel(value: string): string {
   if (!label || label.length > 80) throw new SyncError("Enter a phone label between 1 and 80 characters.", false, "invalid");
   return label;
 }
-function matches(state: SyncIdentity | null, credentials: SyncIdentity): boolean {
-  return state !== null && state.projectId === credentials.projectId &&
-    state.deviceId === credentials.deviceId && state.generationId === credentials.generationId;
-}
+const matches = sameIdentity;
 
 export class SyncController {
   private snapshot: SyncViewState = { ...DISCONNECTED_SYNC_STATE };
   private listeners = new Set<() => void>();
   private credentials: SyncCredentials | null = null;
   private queue: Promise<unknown> = Promise.resolve();
-  private initialization: Promise<void> | null = null;
+  private initialization: Promise<boolean> | null = null;
   private syncPromise: Promise<void> | null = null;
   private connecting = false;
   private controls = 0;
@@ -121,7 +122,12 @@ export class SyncController {
     return () => this.listeners.delete(listener);
   };
 
-  initialize(): Promise<void> {
+  reportStartupError(error: unknown): void {
+    const safe = safeError(error);
+    this.publish({ status: "error", error: safe.message, busy: false });
+  }
+
+  initialize(): Promise<boolean> {
     if (this.initialization) return this.initialization;
     this.initialization = this.enqueue(async () => {
       const configuration = this.configuration;
@@ -129,7 +135,7 @@ export class SyncController {
         const [saved, state, staged] = await Promise.all([
           this.secrets.load(), this.repository.state(), this.repository.pendingEnrollment(),
         ]);
-        if (!this.currentConfiguration(configuration)) return;
+        if (!this.currentConfiguration(configuration)) return false;
         const credentials = saved ? validateCredentials(saved) : null;
         if (
           credentials &&
@@ -138,13 +144,14 @@ export class SyncController {
           this.credentials = credentials;
           await this.refresh(this.generation, null);
           this.scheduleAt(this.now());
+          return true;
         } else {
           this.credentials = null;
           this.publish({
             ...DISCONNECTED_SYNC_STATE,
             deviceLabel: state?.label ?? staged?.label ?? "",
             lastSyncedAt: state?.lastSyncedAt ?? null,
-            error: credentials ? "This installation needs an owner-issued replacement connection code." : null,
+            error: credentials ? "The saved upload identity needs attention. Your workouts remain on this phone." : null,
           });
         }
       } catch {
@@ -152,10 +159,13 @@ export class SyncController {
           this.credentials = null;
           this.publish({
             ...DISCONNECTED_SYNC_STATE,
-            error: "The saved cloud connection could not be loaded. Replace the connection code.",
+            error: "The saved upload connection could not be loaded. Your workouts remain on this phone.",
           });
         }
       }
+      // Retry a transient startup read failure without replacing the saved identity.
+      this.initialization = null;
+      return false;
     });
     return this.initialization;
   }
@@ -187,9 +197,7 @@ export class SyncController {
         if (!this.active) throw new SyncError("Open the app to connect cloud uploads.", true);
         const installationId = this.installationId();
         if (!UUID.test(installationId)) throw new SyncError("A secure installation identity could not be created.", false, "invalid");
-        const staged = await this.repository.prepareEnrollment({
-          projectId: credentials.projectId, deviceId: credentials.deviceId, generationId: credentials.generationId,
-        }, label, installationId);
+        const staged = await this.repository.prepareEnrollment(identityOf(credentials), label, installationId);
         if (!this.currentConfiguration(configuration)) return;
         this.checkStaged(staged, credentials);
         restoreSecrets = true;
@@ -481,6 +489,7 @@ export class SyncController {
         if (!this.current(generation) || !this.active) return;
         const request: SyncRequest = { action: "bind", installationId: staged!.installationId };
         validateResponse(request, await this.transport(request, credentials, () => this.active && this.current(generation)));
+
         if (!this.current(generation) || !this.active) return;
         await this.repository.activateEnrollment(staged!);
         state = await this.repository.state();
@@ -488,7 +497,7 @@ export class SyncController {
       }
       if (!state?.enabled || !state.bound || !matches(state, credentials)) {
         this.credentials = null;
-        throw new SyncError("This installation needs an owner-issued replacement connection code.", false, "auth");
+        throw new SyncError("The saved upload identity needs attention. Your workouts remain on this phone.", false, "auth");
       }
       this.checkStaged(state, credentials);
       this.retryAt = null;

@@ -51,6 +51,38 @@ service cloud.firestore {
         allow read, delete: if false;
       }
     }
+    function automaticOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+    function automaticBinding() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['schemaVersion', 'enabled', 'deviceId', 'generationId', 'installationId'])
+        && data.keys().hasOnly(['schemaVersion', 'enabled', 'deviceId', 'generationId', 'installationId'])
+        && data.schemaVersion == 2 && data.enabled == true
+        && uuid(data.deviceId) && uuid(data.generationId) && uuid(data.installationId);
+    }
+    function automaticRecord(uid, key) {
+      let enrollment = get(/databases/$(database)/documents/automaticUploads/$(uid)).data;
+      return enrollment.schemaVersion == 2 && enrollment.enabled == true
+        && enrollment.installationId == request.resource.data.installationId
+        && record(enrollment.deviceId, enrollment.generationId, key);
+    }
+    match /automaticUploads/{uid} {
+      // App Check is enforced by the Firestore service. Only owner tooling may open this gate.
+      allow create: if automaticOwner(uid)
+        && request.auth.token.firebase.sign_in_provider == 'anonymous'
+        && get(/databases/$(database)/documents/uploadControl/automaticEnrollment).data.enabled == true
+        && automaticBinding();
+      allow update: if automaticOwner(uid) && resource.data.enabled == true
+        && automaticBinding() && request.resource.data == resource.data;
+      allow read, delete: if false;
+      match /records/{key} {
+        allow create: if automaticOwner(uid) && automaticRecord(uid, key);
+        allow update: if automaticOwner(uid) && automaticRecord(uid, key)
+          && (request.resource.data.revision > resource.data.revision || request.resource.data == resource.data);
+        allow read, delete: if false;
+      }
+    }
     match /{document=**} {
       allow read, write: if false;
     }

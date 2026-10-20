@@ -1,5 +1,22 @@
 # Size and efficiency — October 15, 2026
 
+## Automatic uploads measurements — October 19, 2026
+
+Measured on Windows with Node 24.12.0; storage uses in-memory SQLite and a simulated acknowledgment drain. These numbers do not establish iPhone latency or installed native size.
+
+| Measurement | Current release |
+| --- | ---: |
+| Production iOS export | 3,614,242 bytes |
+| Hermes bytecode | 3,199,705 bytes |
+| Initial documents, 1,000 workouts | 7,038 |
+| Baseline SQLite allocation | 4,177,920 bytes |
+| Peak initial upload allocation | 10,391,552 bytes |
+| Retained allocation after drain | 4,800,512 bytes |
+| Median edit with upload queue | 0.757 ms |
+| Median local-only journal edit | 0.504 ms |
+
+The bootstrap table adds one 4,096-byte SQLite page to the earlier baseline and initial-upload allocation. The final export is 86,066 bytes (2.4%) above the October 15 baseline; Hermes is 2.8% larger. This dated comparison includes intervening OTA/UI changes as well as native-module JavaScript wrappers, so it does not isolate App Check overhead. App Attest/Firebase native frameworks are not in the JavaScript export. Their signed-binary and installed-size cost must be measured after Apple signing succeeds; no native size estimate is presented as a measurement. Existing icon-font reduction remains a separate follow-up.
+
 The October 15 cleanup reduces repeated validation and serialization during recording while preserving schedule history, immutable saves, and atomic journal/upload changes. The measurements below separate that cleanup from earlier export and storage baselines. The earlier optimization reduced JavaScript and assets by 54.6% and changed frequent saves from full-journal rewrites to changed workout records.
 
 ## Recording cleanup — October 15, 2026

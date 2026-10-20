@@ -19,14 +19,25 @@ export interface SyncIdentity {
   projectId: string;
   deviceId: string;
   generationId: string;
+  layout?: "legacy" | "automatic";
+  uid?: string;
 }
-export interface SyncCredentials extends SyncIdentity {
+export interface LegacySyncCredentials extends SyncIdentity {
   version: 1;
+  layout?: "legacy";
   apiKey: string;
   uid: string;
   email: string;
   password: string;
 }
+export interface AnonymousSyncCredentials extends SyncIdentity {
+  version: 2;
+  layout: "automatic";
+  uid: string;
+  apiKey: string;
+  refreshToken: string;
+}
+export type SyncCredentials = LegacySyncCredentials | AnonymousSyncCredentials;
 export interface UploadBatch {
   id: string;
   changes: DocumentChange[];
@@ -72,25 +83,60 @@ export function validateIdentity(value: unknown): SyncIdentity {
   if (
     !record(value) || typeof value.projectId !== "string" || !PROJECT_ID.test(value.projectId) ||
     typeof value.deviceId !== "string" || !UUID.test(value.deviceId) ||
-    typeof value.generationId !== "string" || !UUID.test(value.generationId)
+    typeof value.generationId !== "string" || !UUID.test(value.generationId) ||
+    (value.layout !== undefined && value.layout !== "legacy" && value.layout !== "automatic") ||
+    (value.layout === "automatic" && (typeof value.uid !== "string" || !UID.test(value.uid)))
   ) throw new Error("Invalid Firestore identity");
-  return { projectId: value.projectId, deviceId: value.deviceId, generationId: value.generationId };
+  const identity = { projectId: value.projectId, deviceId: value.deviceId, generationId: value.generationId };
+  return value.layout === "automatic"
+    ? { ...identity, layout: "automatic", uid: value.uid as string }
+    : identity;
 }
 export function validateCredentials(value: unknown): SyncCredentials {
   if (
-    !record(value) ||
+    !record(value) || typeof value.apiKey !== "string" || !API_KEY.test(value.apiKey) ||
+    typeof value.uid !== "string" || !UID.test(value.uid)
+  ) throw new Error("Invalid Firestore connection");
+  const identity = validateIdentity(value);
+  if (value.version === 2) {
+    if (
+      !exactKeys(value, ["version", "layout", "projectId", "apiKey", "deviceId", "generationId", "uid", "refreshToken"]) ||
+      value.layout !== "automatic" || typeof value.refreshToken !== "string" ||
+      !/^[!-~]{1,16384}$/.test(value.refreshToken)
+    ) throw new Error("Invalid Firestore connection");
+    return {
+      version: 2, ...identity, layout: "automatic", uid: value.uid, apiKey: value.apiKey,
+      refreshToken: value.refreshToken,
+    };
+  }
+  if (
     !exactKeys(value, ["version", "projectId", "apiKey", "deviceId", "generationId", "uid", "email", "password"]) ||
-    value.version !== 1 || typeof value.apiKey !== "string" || !API_KEY.test(value.apiKey) ||
-    typeof value.uid !== "string" || !UID.test(value.uid) ||
-    typeof value.email !== "string" || value.email.length > 254 || !EMAIL.test(value.email) ||
+    value.version !== 1 || typeof value.email !== "string" || value.email.length > 254 || !EMAIL.test(value.email) ||
     typeof value.password !== "string" || value.password.length < 6 || value.password.length > 256 ||
     /[\u0000-\u001f\u007f]/.test(value.password)
   ) throw new Error("Invalid Firestore connection");
-  const identity = validateIdentity(value);
   return {
-    version: 1, ...identity, apiKey: value.apiKey, uid: value.uid,
+    version: 1, projectId: identity.projectId, deviceId: identity.deviceId, generationId: identity.generationId,
+    apiKey: value.apiKey, uid: value.uid,
     email: value.email, password: value.password,
   };
+}
+export function identityOf(credentials: SyncCredentials): SyncIdentity {
+  return validateIdentity(validateCredentials(credentials));
+}
+export function sameIdentity(left: SyncIdentity | null | undefined, right: SyncIdentity | null | undefined): boolean {
+  if (!left || !right) return false;
+  const a = validateIdentity(left);
+  const b = validateIdentity(right);
+  return a.projectId === b.projectId && a.deviceId === b.deviceId && a.generationId === b.generationId &&
+    a.layout === b.layout && a.uid === b.uid;
+}
+export function documentRoot(identity: SyncIdentity): string {
+  const checked = validateIdentity(identity);
+  const root = `projects/${checked.projectId}/databases/(default)/documents`;
+  return checked.layout === "automatic"
+    ? `${root}/automaticUploads/${checked.uid}`
+    : `${root}/devices/${checked.deviceId}/generations/${checked.generationId}`;
 }
 export function byteLength(text: string): number {
   let bytes = 0;
@@ -125,13 +171,15 @@ function decodeBase64Url(text: string): string {
   if (buffer !== 0) throw new Error("Invalid encoding");
   return decodeURIComponent(escaped);
 }
-export function parseConnectionCode(value: unknown): SyncCredentials {
+export function parseConnectionCode(value: unknown): LegacySyncCredentials {
   try {
     if (typeof value !== "string" || byteLength(value) > MAX_CONNECTION_CODE_BYTES)
       throw new Error("Invalid code");
     const code = value.trim();
     if (!code.startsWith("WORKOUTFB1.")) throw new Error("Invalid code");
-    return validateCredentials(JSON.parse(decodeBase64Url(code.slice(11))));
+    const credentials = validateCredentials(JSON.parse(decodeBase64Url(code.slice(11))));
+    if (credentials.version !== 1) throw new Error("Invalid code");
+    return credentials;
   } catch { throw new Error("Invalid Firestore connection code"); }
 }
 export function makeDocumentKey(kind: UploadKind, deviceId: string, ...source: (string | number)[]): string {
@@ -221,7 +269,7 @@ export function validateDocumentChange(value: unknown, deviceId?: string): Docum
 export function recordDocumentName(identity: SyncIdentity, key: string): string {
   const checked = validateIdentity(identity);
   if (!validDocumentKey(key, checked.deviceId)) throw new Error("Invalid upload document key");
-  return `projects/${checked.projectId}/databases/(default)/documents/devices/${checked.deviceId}/generations/${checked.generationId}/records/${key}`;
+  return `${documentRoot(checked)}/records/${key}`;
 }
 export function encodeFirestoreDocument(
   identity: SyncIdentity,

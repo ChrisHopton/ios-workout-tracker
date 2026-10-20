@@ -46,28 +46,25 @@ Record device, iOS version, build number, tester, and date here:
 - [ ] Change pounds/kilograms and height units; historical weights convert appropriately without changing stored session units or losing fractions.
 - [ ] Save optional demographics, close/reopen, and confirm they persist without changing progression rules.
 
-## Optional Firestore uploads
+## Automatic private uploads
 
-Complete the owner deployment and private setup in [Firestore setup](FIREBASE.md). The Spark project, device authentication, rules/index deployment, and two private unbound codes are ready. Synthetic live uploads and security tests passed; complete the installed-phone checks below. Keep real codes and account/project identifiers out of this checklist and its screenshots.
+Follow the staged owner rollout in [Firestore setup](FIREBASE.md). Emulator tests do not establish native attestation. Do not enable automatic enrollment until Firestore App Check enforcement and real-service rejection checks pass.
 
-- [ ] Confirm the owner has enabled password Authentication, deployed the supplied upload-only rules, and issued two separate private codes. Inspect records through the owner's Firebase Console.
-- [ ] Before connecting, verify the app works offline and presents no Google or Firebase account sign-in screen.
-- [ ] Open Settings > Database uploads. Confirm the profile/full-history explanation and explicit consent are required with a phone label and private code. Once connected, upload status stays visible and rename, code replacement, and disconnect appear under Manage connection.
-- [ ] Connect the first phone. Verify its installation binding and distinct device/generation namespace in the owner console. Check supplied age, gender, height, units, plans, schedule snapshots, workouts, and sets.
-- [ ] Confirm all client record reads and lists are denied. The app must not fetch, merge, or restore cloud history.
-- [ ] Interrupt initial upload, restart, and resume. Verify the frozen retry is identical, acknowledgments clear only the confirmed revisions, and Initial history uploaded appears only after all history drains and the completion marker commits.
-- [ ] Go offline, make rapid edits, and confirm local Saved while uploads remain pending. Force-close, reopen, reconnect, and verify the newest drafts upload with blank strings distinct from zero.
-- [ ] Edit a finished set and inspect its existing workout/exercise documents. Remove a local record and verify a revisioned tombstone with an empty payload replaces its cloud content.
-- [ ] Rename an exercise or alter a plan and verify recorded sessions and historical schedule snapshots retain the old definitions and targets.
-- [ ] Rename the phone label and verify only its profile changes while historical identity remains stable.
-- [ ] Connect the second phone with its different code. Verify independent local journals and cloud namespaces, including records with matching source IDs.
-- [ ] Background and reopen during upload. Verify pending data remains and retries in the next active session; no immediate background upload is assumed.
-- [ ] Reach a test upload-budget limit. Confirm Uploads paused and the next attempt are visible, retries do not bypass the cap, and local recording continues. Verify resume across Pacific midnight.
-- [ ] Test invalid and revoked codes. Confirm errors, working local recording, and no unauthorized cloud writes. Test owner-issued credential rotation without losing the installation binding, revision clock, or frozen batch.
-- [ ] Disconnect and restart. Confirm uploads stop and existing cloud data remains. Reconnect after offline edits/deletions and verify their latest state uploads.
-- [ ] Test failed secure-storage reads/writes and a restart during enrollment in a development build; recover without losing journal data or accidentally activating another identity.
-- [ ] Drain a large initial history queue, reopen, and inspect native storage size/responsiveness. Verify maintenance preserves workouts and does not requeue acknowledged records.
-- [ ] Replace a test phone with an owner-issued fresh generation. Verify its local journal starts empty, the old cloud generation stays available to owner analysis, and the old code cannot bind the new installation. The app must not restore from Firestore or offer JSON restore controls.
+- [ ] Install the new native build over the existing app on both phones, preserving local history. Verify both UDIDs and production App Attest entitlement in the signed profile.
+- [ ] Open each phone online and verify valid App Attest token metrics. Confirm no debug provider or tokens are configured.
+- [ ] Enforce Firestore App Check, verify missing/invalid tokens fail in the real service, then enable automatic enrollment using the owner tool.
+- [ ] Settings has the gender selector, disclosure and compact read-only upload status; no database forms, code entry, rename, replacement or Disconnect controls.
+- [ ] Select each gender option, cancel the sheet, restart, and verify persisted values. Existing custom values remain until changed. Check light/dark mode, larger text and VoiceOver.
+- [ ] Verify initial history and completion marker for both phones, then edit a set and verify an incremental upload. Matching labels/source IDs must remain in separate namespaces.
+- [ ] Existing password-connected installations retain their namespaces, revision counters and frozen batches.
+- [ ] Start offline; record locally, force-close, reopen and reconnect. Setup resumes the persisted identity; blank and zero remain distinct.
+- [ ] Interrupt enrollment and uploads. Verify identical retry content and no duplicate installation; newer edits remain queued.
+- [ ] Verify denied own/cross-account reads, lists and deletes; app traffic contains only authentication and Firestore commits.
+- [ ] Revoke a test installation through owner tooling. Previously issued tokens cannot write; the app does not silently create a replacement account. Local recording remains available.
+- [ ] Inject storage read/corruption and token rejection in development. They must not be treated as a fresh installation.
+- [ ] Verify per-phone attempted-write limit and retry backoff, including Pacific midnight and foreground resume.
+- [ ] On a disposable test installation, uninstall/reinstall and verify a fresh identity; old records remain owner-visible. Never uninstall a phone whose local history must be retained.
+- [ ] Record installed binary size and Documents & Data on both phones. This is needed for actual native-size measurements.
 
 ## Updates and internal migration safeguards
 
