@@ -4,6 +4,8 @@ These briefs define separate follow-up tasks. The cleanup keeps SQLite schema 5,
 
 ## Large-history portable backups
 
+The current interface intentionally omits portable backup and restore controls at the owner's request. Pursue this workflow only if the owner requests it again.
+
 **Problem and current boundary:** A valid local journal can exceed the 10 MiB portable JSON limit. Internal pre-migration copies now bypass that external-input guard and retain the original schema, but Settings still cannot import a recovery copy above 10 MiB. Portable v2 exports and v1/v2 imports remain bounded at 10 MiB. Removing the migration guard fixes launch lockout; it does not complete portable recovery for larger histories.
 
 **Task:** Design and implement a recoverable portable backup path for larger local histories with an explicit supported size range and measured phone memory use. Inspect `src/domain/backup.ts`, native/web `src/data/backupIO*`, `src/data/journalStorage.ts`, and the Settings restore flow. Decide whether a measured finite larger JSON limit is sufficient for the stated range or whether bounded-memory/chunked export and import need a new format. A finite larger limit is an interim bounded improvement, not support for every journal accepted by local storage.

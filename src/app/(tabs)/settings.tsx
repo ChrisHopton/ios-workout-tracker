@@ -1,9 +1,7 @@
 import { useRef, useState } from "react";
-import { Alert, View } from "react-native";
+import { View } from "react-native";
 import { useApp } from "../../data/store";
-import { parseBackup, serializeBackup } from "../../domain/backup";
-import { exportFile, importFile, migrationBackupAvailable, exportMigrationBackup } from "../../data/backupIO";
-import { AppData, Unit } from "../../domain/types";
+import { Unit } from "../../domain/types";
 import {
   Button,
   Card,
@@ -55,7 +53,7 @@ function parseHeight(fields: HeightFields, unit: Unit): number | null {
 }
 
 export default function Settings() {
-  const { data, update, flush, replace } = useApp();
+  const { data, update, flush } = useApp();
   const t = useTheme();
   const [age, setAge] = useState(data.settings.age);
   const [gender, setGender] = useState(data.settings.gender);
@@ -71,10 +69,10 @@ export default function Settings() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [pendingRestore, setPendingRestore] = useState<AppData | null>(null);
   const [query, setQuery] = useState("");
   const [exerciseId, setExerciseId] = useState("");
   const [increment, setIncrement] = useState("");
+  const [showIncrements, setShowIncrements] = useState(false);
   const exercise = data.exercises.find((item) => item.id === exerciseId);
 
   async function action(work: () => Promise<void>) {
@@ -146,44 +144,8 @@ export default function Settings() {
       setMessage("Profile saved.");
     });
   }
-  async function restore() {
-    if (!pendingRestore) return;
-    const backup = pendingRestore;
-    await action(async () => {
-      await replace(backup);
-      setAge(backup.settings.age);
-      setGender(backup.settings.gender);
-      setCanonicalHeight(backup.settings.heightCm);
-      setHeightEdited(false);
-      setHeight(heightFields(backup.settings.heightCm));
-      setPendingRestore(null);
-      setMessage("Backup restored.");
-      setExerciseId("");
-      setIncrement("");
-    });
-  }
-  function confirmRestore() {
-    if (busyRef.current) return;
-    Alert.alert(
-      "Replace data on this phone?",
-      "Your current profile, plans, and workout history will be replaced. Export a backup first if you want to keep them.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Replace & restore",
-          style: "destructive",
-          onPress: () => {
-            void restore();
-          },
-        },
-      ],
-    );
-  }
   return (
     <Screen bottomSafeArea={false}>
-      <Txt bold style={{ fontSize: 30, lineHeight: 38 }}>
-        Make it yours
-      </Txt>
       <SaveIndicator />
       {!!error && (
         <Card>
@@ -206,10 +168,10 @@ export default function Settings() {
           />
         </Row>
         <Txt muted style={{ fontSize: 12 }}>
-          New workouts use your preferred unit. Existing recordings keep their
-          original unit; charts convert for comparison.
+          Used for new workouts and chart display.
         </Txt>
       </Card>
+      <BodyWeightSettings disabled={busy} />
       <Card>
         <SectionTitle>Your profile</SectionTitle>
         <Txt muted style={{ fontSize: 13 }}>
@@ -273,187 +235,94 @@ export default function Settings() {
           </Row>
         )}
         <Button title="Save profile" disabled={busy} onPress={saveProfile} />
-        <Txt muted style={{ fontSize: 12 }}>
-          Weight suggestions use your completed sets and reps. These profile
-          details do not adjust lifting targets.
-        </Txt>
       </Card>
       <Card>
         <SectionTitle>Weight increments</SectionTitle>
-        <Txt muted style={{ fontSize: 13 }}>
-          Set the smallest available increase for each exercise. Suggestions
-          apply to future recordings.
-        </Txt>
-        <Field
-          label="Find an exercise"
-          value={query}
-          editable={!busy}
-          onChangeText={(value) => {
-            if (!busyRef.current) setQuery(value);
-          }}
-          placeholder="Search exercises…"
-        />
-        <Row style={{ flexWrap: "wrap", gap: 7 }}>
-          {data.exercises
-            .filter(
-              (item) =>
-                item.equipment !== "bodyweight" &&
-                item.name.toLowerCase().includes(query.toLowerCase()),
-            )
-            .slice(0, query ? 12 : 5)
-            .map((item) => (
-              <Chip
-                key={item.id}
-                label={item.name}
-                selected={exerciseId === item.id}
+        <Button title={showIncrements ? "Hide increments" : "Adjust weight increments"} secondary disabled={busy} onPress={() => setShowIncrements(!showIncrements)} />
+        {showIncrements && <>
+          <Field
+            label="Find an exercise"
+            value={query}
+            editable={!busy}
+            onChangeText={(value) => {
+              if (!busyRef.current) setQuery(value);
+            }}
+            placeholder="Search exercises…"
+          />
+          <Row style={{ flexWrap: "wrap", gap: 7 }}>
+            {data.exercises
+              .filter(
+                (item) =>
+                  item.equipment !== "bodyweight" &&
+                  item.name.toLowerCase().includes(query.toLowerCase()),
+              )
+              .slice(0, query ? 12 : 5)
+              .map((item) => (
+                <Chip
+                  key={item.id}
+                  label={item.name}
+                  selected={exerciseId === item.id}
+                  onPress={() => {
+                    if (busyRef.current) return;
+                    setExerciseId(item.id);
+                    setIncrement(
+                      String(
+                        data.settings.unit === "lb"
+                          ? item.incrementLb
+                          : item.incrementKg,
+                      ),
+                    );
+                  }}
+                />
+              ))}
+          </Row>
+          {!!exercise && (
+            <>
+              <Field
+                label={exercise.name + " increment (" + data.settings.unit + ")"}
+                value={increment}
+                editable={!busy}
+                onChangeText={(value) => {
+                  if (!busyRef.current) setIncrement(value.replace(",", "."));
+                }}
+                keyboardType="decimal-pad"
+                maxLength={8}
+              />
+              <Button
+                secondary
+                title="Save increment"
+                disabled={busy}
                 onPress={() => {
-                  if (busyRef.current) return;
-                  setExerciseId(item.id);
-                  setIncrement(
-                    String(
-                      data.settings.unit === "lb"
-                        ? item.incrementLb
-                        : item.incrementKg,
-                    ),
-                  );
+                  void action(async () => {
+                    if (
+                      !/^\d+(\.\d+)?$/.test(increment) ||
+                      Number(increment) < 0.001 ||
+                      Number(increment) > 1000
+                    )
+                      throw new Error("Choose an increment from 0.001 to 1,000.");
+                    update((current) => ({
+                      ...current,
+                      exercises: current.exercises.map((item) =>
+                        item.id === exercise.id
+                          ? {
+                              ...item,
+                              [current.settings.unit === "lb"
+                                ? "incrementLb"
+                                : "incrementKg"]: Number(increment),
+                            }
+                          : item,
+                      ),
+                    }));
+                    await flush();
+                    setMessage("Increment saved.");
+                  });
                 }}
               />
-            ))}
-        </Row>
-        {!!exercise && (
-          <>
-            <Field
-              label={exercise.name + " increment (" + data.settings.unit + ")"}
-              value={increment}
-              editable={!busy}
-              onChangeText={(value) => {
-                if (!busyRef.current) setIncrement(value.replace(",", "."));
-              }}
-              keyboardType="decimal-pad"
-              maxLength={8}
-            />
-            <Button
-              secondary
-              title="Save increment"
-              disabled={busy}
-              onPress={() => {
-                void action(async () => {
-                  if (
-                    !/^\d+(\.\d+)?$/.test(increment) ||
-                    Number(increment) < 0.001 ||
-                    Number(increment) > 1000
-                  )
-                    throw new Error("Choose an increment from 0.001 to 1,000.");
-                  update((current) => ({
-                    ...current,
-                    exercises: current.exercises.map((item) =>
-                      item.id === exercise.id
-                        ? {
-                            ...item,
-                            [current.settings.unit === "lb"
-                              ? "incrementLb"
-                              : "incrementKg"]: Number(increment),
-                          }
-                        : item,
-                    ),
-                  }));
-                  await flush();
-                  setMessage("Increment saved.");
-                });
-              }}
-            />
-          </>
-        )}
+            </>
+          )}
+        </>}
       </Card>
-      <BodyWeightSettings disabled={busy} />
       <SyncSettings disabled={busy} />
-      <Card>
-        <SectionTitle>Backup & restore</SectionTitle>
-        {migrationBackupAvailable() && (
-          <Button
-            title="Export pre-migration backup"
-            secondary
-            disabled={busy}
-            onPress={() => {
-              void exportMigrationBackup().then(() => setMessage("Pre-migration backup shared.")).catch((error: unknown) => {
-                setMessage(error instanceof Error ? error.message : "Unable to share the backup.");
-              });
-            }}
-          />
-        )}
-        <Txt muted style={{ fontSize: 13 }}>
-          Keep a copy in Files before replacing your phone or deleting the app.
-          Backups include your profile and complete workout history.
-        </Txt>
-        <Button
-          title="Export backup"
-          disabled={busy}
-          onPress={() => {
-            void action(async () => {
-              await flush();
-              await exportFile(serializeBackup(data));
-            });
-          }}
-        />
-        <Button
-          title="Choose backup to restore"
-          secondary
-          disabled={busy}
-          onPress={() => {
-            void action(async () => {
-              const text = await importFile();
-              if (text !== null) setPendingRestore(parseBackup(text));
-            });
-          }}
-        />
-        {!!pendingRestore && (
-          <View
-            style={{
-              gap: 12,
-              borderTopWidth: 1,
-              borderColor: t.border,
-              paddingTop: 16,
-            }}
-          >
-            <Txt bold>Backup ready to restore</Txt>
-            <Txt muted>
-              {
-                pendingRestore.templates.filter((workout) => !workout.archived)
-                  .length
-              }{" "}
-              plans · {pendingRestore.sessions.length} workout records
-            </Txt>
-            <Txt style={{ fontSize: 13 }}>
-              Restoring replaces the current data on this phone.
-            </Txt>
-            <Button
-              title="Replace & restore"
-              danger
-              disabled={busy}
-              onPress={confirmRestore}
-            />
-            <Button
-              title="Cancel restore"
-              secondary
-              disabled={busy}
-              onPress={() => {
-                if (!busyRef.current) setPendingRestore(null);
-              }}
-            />
-          </View>
-        )}
-      </Card>
-      <Card>
-        <Txt bold>Workout · 1.0</Txt>
-        <Txt muted style={{ fontSize: 13 }}>
-          Your routine saves on this phone. Database uploads are optional
-          and use a private connection code without app sign-in.
-        </Txt>
-        <Txt muted style={{ fontSize: 12 }}>
-          Progression suggestions are simple training heuristics. You always
-          choose the weight.
-        </Txt>
-      </Card>
     </Screen>
   );
 }

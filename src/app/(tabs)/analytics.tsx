@@ -7,7 +7,6 @@ import { formatDate, today } from "../../domain/dates";
 import { AppData, MUSCLE_GROUPS, MuscleGroup } from "../../domain/types";
 import { loadLabel } from "../../domain/library";
 import { BarChart, LineChart } from "../../components/charts";
-import { BodyWeightSettings } from "../../components/BodyWeightSettings";
 import { Card, Chip, Row, Screen, SectionTitle, Txt, useTheme } from "../../components/ui";
 
 const round = (value: number) => Math.round(value * 100) / 100;
@@ -62,9 +61,6 @@ export default function Analytics() {
       <View style={{ gap: 6 }}>
         <Txt bold style={{ fontSize: 30, lineHeight: 38 }}>See your progress</Txt>
         <Txt muted>Small steps. A stronger routine.</Txt>
-        {!!(data.settings.age || data.settings.gender) && <Txt muted style={{ fontSize: 12 }}>
-          Profile: {[data.settings.age ? data.settings.age + " years" : "", data.settings.gender].filter(Boolean).join(" · ")}
-        </Txt>}
       </View>
       <Row>{[4, 8, 12].map((count) => <Chip key={count} label={count + " weeks"} selected={count === weeks} onPress={() => setWeeks(count)} />)}</Row>
       <Txt muted style={{ fontSize: 12 }}>{formatDate(result.startDate)} – {formatDate(result.endDate)} · Finished workouts · Working sets</Txt>
@@ -95,10 +91,9 @@ export default function Analytics() {
         {result.bodyWeight.points.length ? <>
           <LineChart values={result.bodyWeight.points.map((point) => round(point.weight))} labels={result.bodyWeight.points.map((point) => shortDate(point.date))} description={"Body weight in " + data.settings.unit} />
           <Txt bold>{result.bodyWeight.change === null ? "Add another measurement to see a change" : (result.bodyWeight.change > 0 ? "+" : "") + round(result.bodyWeight.change) + " " + data.settings.unit + " between the first and last measurement in this period"}</Txt>
-        </> : <Txt muted>No measurements in this period. Add an optional dated body weight below.</Txt>}
+        </> : <Txt muted>No measurements in this period. Add body weight in Settings.</Txt>}
         {result.bodyWeight.latest && <Txt muted style={{ fontSize: 13 }}>Latest: {round(result.bodyWeight.latest.weight)} {data.settings.unit} · {formatDate(result.bodyWeight.latest.date)}</Txt>}
       </Card>
-      <BodyWeightSettings />
       {result.completedWorkouts === 0 && <Card><Txt bold>Your story starts with a set</Txt><Txt muted>Finish your first recorded workout to see your exercise history. Your charts will grow with your routine.</Txt></Card>}
       <Card>
         <SectionTitle>Training by muscle group</SectionTitle>
@@ -149,7 +144,7 @@ export default function Analytics() {
           {ratios.length ? <>
             <LineChart values={ratios.map((point) => round(point.relativeStrength!))} labels={ratios.map((point) => shortDate(point.date))} description={history.name + " estimated strength as multiples of body weight"} />
             {ratios.slice(-3).reverse().map((point, index) => <Txt key={point.date + ":" + index} style={{ fontSize: 13 }}>{formatDate(point.date)}: {round(point.relativeStrength!)}× body weight · {round(point.bodyWeight!)} {data.settings.unit} measured {formatDate(point.measurementDate!)}{point.measurementStale ? " (over 28 days old)" : ""}</Txt>)}
-          </> : <Txt muted>Add a body-weight measurement dated on or before a workout with a completed working set of 1–10 reps.</Txt>}
+          </> : <Txt muted>Add body weight in Settings and complete a working set of 1–10 reps to see relative strength.</Txt>}
           {strength?.measurementDate === null && <Txt muted style={{ fontSize: 12 }}>The latest strength estimate has no earlier body-weight measurement.</Txt>}
           <Txt muted style={{ fontSize: 12 }}>{loadLabel(history.equipment)}. Ratios describe this exercise and equipment only; they are not population rankings.</Txt>
         </Card>}

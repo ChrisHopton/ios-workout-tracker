@@ -360,7 +360,7 @@ export default function WorkoutEditor() {
     return (
       <Screen>
         <SectionTitle>Workout not found</SectionTitle>
-        <Txt muted>This plan may have been removed by a restored backup.</Txt>
+        <Txt muted>This plan is no longer available.</Txt>
         <Button title="Back to plans" onPress={leave} />
       </Screen>
     );

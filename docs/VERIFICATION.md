@@ -1,5 +1,15 @@
 # Verification report — October 19, 2026
 
+## October 19 simplified interface
+
+Body-weight entry is available only in Settings; Analytics retains read-only charts and suggestions. Settings no longer contains portable backup, import, export, pre-migration-copy, or restore controls. Their screen handlers and redundant explanatory panels were removed. Weight-increment inputs start collapsed. Connected upload status stays visible, with rename, replacement, and disconnect behind Manage connection.
+
+The application suite passed 217 tests with zero failures and one emulator-only skip. TypeScript, Expo ESLint, and production iOS export passed. No upload protocol, security rules, schema, or native dependencies changed in this interface pass.
+
+The local browser mock verified zero Analytics text inputs, zero backup/recovery controls, a saved 182.5 lb measurement in Settings reflected in Analytics, pounds/kilograms switching, collapsed increment controls, connection consent, hidden/expanded management actions, and cancellation of replacement returning to the prior connection controls. Browser uploads did not contact Firebase. Installed-phone and OTA delivery checks remain owner steps; no OTA update was published.
+
+Existing workout records, upload state, internal migration safeguards, and versioned validation remain. Earlier sections describing Settings backup restoration or measurement drafts in Analytics refer to prior interfaces.
+
 ## October 19 iPhone layout correction
 
 The Home create-plan button now uses a centered 28-point icon inside a 44-by-44 touch target instead of a padded 54-point control. Bottom tabs use the navigator's standard bar height and safe-area padding, with standard-sized labels protected from text shrinkage. Home, Analytics, and Settings no longer add the bottom safe-area inset a second time; editor and recording screens retain their own bottom protection.
