@@ -110,3 +110,10 @@ A development build uses a running development server; use `preview` for everyda
 Expo Go cannot load this app's native Firebase modules. Use a development build or the standalone preview build. Production App Attest requires a physical device; do not add debug tokens to production configuration.
 
 If installation fails, check iOS version, selected UDID, Developer Mode, Apple device-processing status, and signing expiry. If the app asks for a development server, install a `preview` build. Keep the existing installation when troubleshooting so its local data remains available.
+
+
+## October 22 Settings and offline comparisons
+
+This change adds no native dependency. Its JavaScript and bundled reference tables can use an OTA update only on an installed binary with the matching runtime. It does not replace the new App Check native installation or the pending attestation/enforcement rollout described above. No update was published during source delivery.
+
+Install updates over the existing app to preserve local workouts. In Settings, choose Female or Male and save the profile; the button confirms ✓ Saved after local persistence. Record body weight using the compact input; entering another value today updates today’s record. Expand Change date or History only when needed. Analytics uses downloaded-at-build-time aggregate tables offline; phones never request benchmark or workout records from Firestore. The optional competitor line appears under Estimated strength for barbell squat, bench press and deadlift.

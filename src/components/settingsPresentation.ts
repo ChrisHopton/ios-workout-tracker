@@ -3,8 +3,6 @@ import type { SyncViewState } from "../sync/controller";
 export const GENDER_OPTIONS = [
   { value: "female", label: "Female" },
   { value: "male", label: "Male" },
-  { value: "non-binary", label: "Non-binary" },
-  { value: "prefer not to say", label: "Prefer not to say" },
 ] as const;
 
 // Legacy profile strings remain intact until the user chooses a new value.

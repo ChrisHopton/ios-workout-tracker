@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "retrievedDate": "2026-10-22",
+  "sources": {
+    "nhanesBody": {
+      "filename": "BMX_L.xpt",
+      "url": "https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2021/DataFiles/BMX_L.xpt",
+      "sha256": "44440c416d9ad709e8b1708a5975378ab4d5b18edc39eb5015c2ae7186500170",
+      "bytes": 1563200,
+      "expectedRows": 8860
+    },
+    "nhanesDemographics": {
+      "filename": "DEMO_L.xpt",
+      "url": "https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2021/DataFiles/DEMO_L.xpt",
+      "sha256": "ca4374a158b493b8b0163e1388da21d57a18d1b9cecff2aa4e2fa2bec494fe23",
+      "bytes": 2582160,
+      "expectedRows": 11933
+    },
+    "openPowerlifting": {
+      "filename": "openpowerlifting-c7782562.zip",
+      "url": "https://openpowerlifting.gitlab.io/opl-csv/files/openpowerlifting-latest.zip",
+      "sha256": "1d63801cc7dc955840a0ae24c0deb063dbf0539a1b5dfc9c7f6ddb7478abdd67",
+      "bytes": 170462236,
+      "expectedRows": 4050248,
+      "revision": "c778256276ecda9fc5f4d1345be11a16ac8c9dc3",
+      "csvMember": "openpowerlifting-2026-10-17/openpowerlifting-2026-10-17-c7782562.csv",
+      "archiveDate": "2026-10-17",
+      "indexUpdated": "2026-10-16",
+      "advertisedRowsIncludingHeader": 4050249
+    }
+  }
+}

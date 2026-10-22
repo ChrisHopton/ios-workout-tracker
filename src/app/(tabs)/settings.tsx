@@ -17,6 +17,8 @@ import { SyncSettings } from "../../components/SyncSettings";
 import { BodyWeightSettings } from "../../components/BodyWeightSettings";
 import { SaveIndicator } from "../../components/SaveIndicator";
 import { GenderSelector } from "../../components/GenderSelector";
+import { InlineSaveButton } from "../../components/InlineSaveButton";
+import { useSaveAction } from "../../components/useSaveAction";
 
 type HeightFields = { cm: string; feet: string; inches: string };
 function heightFields(cm: number | null): HeightFields {
@@ -66,6 +68,7 @@ export default function Settings() {
     data.settings.heightCm,
   );
   const [heightEdited, setHeightEdited] = useState(false);
+  const profileSave = useSaveAction();
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -99,9 +102,10 @@ export default function Settings() {
       : canonicalHeight;
   }
   function editHeight(key: keyof HeightFields, value: string) {
-    if (busyRef.current) return;
+    if (busyRef.current || value.replace(",", ".") === height[key]) return;
     setHeight((current) => ({ ...current, [key]: value.replace(",", ".") }));
     setHeightEdited(true);
+    profileSave.edited();
   }
   function chooseUnit(unit: Unit) {
     if (busyRef.current || unit === data.settings.unit) return;
@@ -123,27 +127,30 @@ export default function Settings() {
     });
   }
   function saveProfile() {
-    void action(async () => {
-      if (
-        age !== "" &&
-        (!/^\d+$/.test(age) || Number(age) < 1 || Number(age) > 130)
-      )
-        throw new Error("Enter an age from 1 to 130, or leave it blank.");
-      const cm = currentHeight();
-      update((current) => ({
-        ...current,
-        settings: {
-          ...current.settings,
-          age,
-          gender,
-          heightCm: cm,
-        },
-      }));
-      await flush();
-      setCanonicalHeight(cm);
-      setHeightEdited(false);
-      setMessage("Profile saved.");
-    });
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    void (async () => {
+      let cm: number | null = null;
+      try {
+        const succeeded = await profileSave.run(() => {
+          if (age !== "" && (!/^\d+$/.test(age) || Number(age) < 1 || Number(age) > 130))
+            throw new Error("Enter an age from 1 to 130, or leave it blank.");
+          cm = currentHeight();
+          update((current) => ({
+            ...current,
+            settings: { ...current.settings, age, gender, heightCm: cm },
+          }));
+        }, flush);
+        if (succeeded) {
+          setCanonicalHeight(cm);
+          setHeightEdited(false);
+        }
+      } finally {
+        busyRef.current = false;
+        setBusy(false);
+      }
+    })();
   }
   return (
     <Screen bottomSafeArea={false}>
@@ -183,7 +190,7 @@ export default function Settings() {
           value={age}
           editable={!busy}
           onChangeText={(value) => {
-            if (!busyRef.current) setAge(value);
+            if (!busyRef.current && value !== age) { setAge(value); profileSave.edited(); }
           }}
           keyboardType="number-pad"
           maxLength={3}
@@ -193,7 +200,7 @@ export default function Settings() {
           value={gender}
           disabled={busy}
           onChange={(value) => {
-            if (!busyRef.current) setGender(value);
+            if (!busyRef.current && value !== gender) { setGender(value); profileSave.edited(); }
           }}
         />
         {data.settings.unit === "kg" ? (
@@ -232,7 +239,12 @@ export default function Settings() {
             </View>
           </Row>
         )}
-        <Button title="Save profile" disabled={busy} onPress={saveProfile} />
+        <InlineSaveButton state={profileSave} subject="profile" disabled={busy} onPress={saveProfile} />
+        {!!profileSave.error && (
+          <View accessibilityRole="alert" accessibilityLiveRegion="polite">
+            <Txt style={{ color: t.danger }}>{profileSave.error}</Txt>
+          </View>
+        )}
       </Card>
       <Card>
         <SectionTitle>Weight increments</SectionTitle>

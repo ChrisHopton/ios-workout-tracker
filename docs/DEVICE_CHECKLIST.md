@@ -87,3 +87,14 @@ Open issues / screenshots / results:
 - [ ] Add/edit/delete dated body weights only in Settings; units preserve canonical kg and Analytics updates its read-only history/ratios. Ratios use a measurement on or before each workout.
 - [ ] Read estimated-strength charts, all-time records, volume, empty states, and dated body-weight ratios with large text and both themes.
 - [ ] Verify original results/suggestions, pending uploads, and internal migration copies survive upgrade/restart. Settings increment controls start collapsed and open through Adjust weight increments.
+
+
+## October 22 Settings and comparison acceptance (pending on iPhone)
+
+- [ ] Profile offers only Female/Male; save confirmation stays beside the button until another edit.
+- [ ] Weight input and Save fit a Pro Max screen, wrap with larger Dynamic Type, and remain usable above the keyboard.
+- [ ] Same-day weight updates retain one entry; changing date and editing/deleting history preserve the right records.
+- [ ] Failed saves preserve input and retry; VoiceOver announces saving, saved, and failure without confusing upload state.
+- [ ] Compact body comparison and optional competitor median are readable in light/dark mode and larger text; source details expand only when requested.
+- [ ] Reference toggle and category override survive tab switches without modifying profile or suggested working weights.
+- [ ] Force-close/reopen preserves profile, measurements and workout history; comparisons work in airplane mode.

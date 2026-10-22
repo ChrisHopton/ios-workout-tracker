@@ -7,6 +7,9 @@ import { formatDate, today } from "../../domain/dates";
 import { AppData, MUSCLE_GROUPS, MuscleGroup } from "../../domain/types";
 import { loadLabel } from "../../domain/library";
 import { BarChart, LineChart } from "../../components/charts";
+import { BodyWeightComparison, BenchmarkDetails } from "../../components/BenchmarkComparison";
+import { benchmarkMeasurement, bodyWeightBenchmark, referenceGroupForGender, ReferenceGroup, strengthBenchmark, supportsStrengthBenchmark } from "../../domain/benchmarks";
+import { convertWeight } from "../../domain/recommendations";
 import { Card, Chip, Row, Screen, SectionTitle, Txt, useTheme } from "../../components/ui";
 
 const round = (value: number) => Math.round(value * 100) / 100;
@@ -22,6 +25,8 @@ export default function Analytics() {
   const [nextExerciseId, setNextExerciseId] = useState("");
   const [metric, setMetric] = useState<"weight" | "reps" | "strength">("weight");
   const [endDate, setEndDate] = useState(today);
+  const [referenceOverride, setReferenceOverride] = useState<ReferenceGroup | null | undefined>(undefined);
+  const [showReference, setShowReference] = useState(false);
   // Retain the visible snapshot on blur so hidden recording edits do not rebuild analytics
   useFocusEffect(useCallback(() => {
     setData(currentData);
@@ -45,8 +50,14 @@ export default function Analytics() {
     };
   }, []));
   const result = useMemo(() => data ? summarize(data, weeks, endDate, data.settings.unit) : null, [data, weeks, endDate]);
-  if (!data || !result) return <Screen bottomSafeArea={false}><Txt muted>Loading progress…</Txt></Screen>;
-  const history = result.exerciseHistory.find((entry) => entry.variantId === variantId) ?? result.exerciseHistory[0];
+  const referenceGroup = referenceOverride === undefined ? referenceGroupForGender(data?.settings.gender ?? "") : referenceOverride;
+  const comparison = useMemo(() => data ? {
+    body: bodyWeightBenchmark(data.settings, referenceGroup),
+    measurement: benchmarkMeasurement(data.bodyWeights, endDate),
+  } : null, [data, referenceGroup, endDate]);
+  const history = result?.exerciseHistory.find((entry) => entry.variantId === variantId) ?? result?.exerciseHistory[0];
+  const strengthReference = useMemo(() => data && history ? strengthBenchmark(history.exerciseId, history.equipment, data.settings.age, referenceGroup, comparison?.measurement?.weightKg ?? null) : null, [data, history, referenceGroup, comparison]);
+  if (!data || !result || !comparison) return <Screen bottomSafeArea={false}><Txt muted>Loading progress…</Txt></Screen>;
   const next = result.nextWorkout;
   const nextExercise = next?.exercises.find((entry) => entry.id === nextExerciseId) ?? next?.exercises[0];
   const labels = result.weeks.map((week) => formatDate(week.startDate, { month: "numeric", day: "numeric" }));
@@ -86,14 +97,7 @@ export default function Analytics() {
         </>}
         <Txt muted style={{ fontSize: 12 }}>An estimate from prior finished workouts. Your actual results stay separate until you enter or accept a suggestion.</Txt>
       </Card>}
-      <Card>
-        <SectionTitle>Body-weight trend</SectionTitle>
-        {result.bodyWeight.points.length ? <>
-          <LineChart values={result.bodyWeight.points.map((point) => round(point.weight))} labels={result.bodyWeight.points.map((point) => shortDate(point.date))} description={"Body weight in " + data.settings.unit} />
-          <Txt bold>{result.bodyWeight.change === null ? "Add another measurement to see a change" : (result.bodyWeight.change > 0 ? "+" : "") + round(result.bodyWeight.change) + " " + data.settings.unit + " between the first and last measurement in this period"}</Txt>
-        </> : <Txt muted>No measurements in this period. Add body weight in Settings.</Txt>}
-        {result.bodyWeight.latest && <Txt muted style={{ fontSize: 13 }}>Latest: {round(result.bodyWeight.latest.weight)} {data.settings.unit} · {formatDate(result.bodyWeight.latest.date)}</Txt>}
-      </Card>
+      <BodyWeightComparison benchmark={comparison.body} measurement={comparison.measurement} unit={data.settings.unit} group={referenceGroup} overridden={referenceOverride !== undefined} onGroup={setReferenceOverride} />
       {result.completedWorkouts === 0 && <Card><Txt bold>Your story starts with a set</Txt><Txt muted>Finish your first recorded workout to see your exercise history. Your charts will grow with your routine.</Txt></Card>}
       <Card>
         <SectionTitle>Training by muscle group</SectionTitle>
@@ -125,7 +129,15 @@ export default function Analytics() {
             <Chip label="Estimated strength" selected={metric === "strength"} onPress={() => setMetric("strength")} />
           </Row>}
           <Txt muted style={{ fontSize: 13 }}>{effectiveMetric === "strength" ? "Approximate estimated maximum · " + data.settings.unit + " · completed working sets of 1–10 reps" : effectiveMetric === "reps" ? history.equipment === "bodyweight" ? "Best recorded working-set reps per workout" : "Reps accompanying the heaviest working set each workout" : "Heaviest completed working set per workout · " + data.settings.unit}</Txt>
-          {chartPoints.length ? <LineChart values={chartPoints.map((point) => point.value)} labels={chartPoints.map((point) => shortDate(point.date))} description={history.name + " " + effectiveMetric + " history"} /> : <Txt muted>Complete a working set with 1–10 reps to see estimated strength.</Txt>}
+          {chartPoints.length ? <LineChart values={chartPoints.map((point) => point.value)} labels={chartPoints.map((point) => shortDate(point.date))} description={history.name + " " + effectiveMetric + " history"} referenceLine={effectiveMetric === "strength" && showReference && strengthReference?.available ? { value: convertWeight(strengthReference.valueKg, "kg", data.settings.unit), label: "Competitor median: " + Math.round(convertWeight(strengthReference.valueKg, "kg", data.settings.unit)) + " " + data.settings.unit } : undefined} /> : <Txt muted>Complete a working set with 1–10 reps to see estimated strength.</Txt>}
+          {effectiveMetric === "strength" && supportsStrengthBenchmark(history.exerciseId, history.equipment) && strengthReference && <View style={{ gap: 6 }}>
+            {strengthReference.available ? <>
+              <Chip label="Show competitor median" selected={showReference} onPress={() => setShowReference(!showReference)} />
+              <Txt muted style={{ fontSize: 12 }}>Approximate comparison with competitive lifters, using your current profile and body weight.</Txt>
+            </> : <Txt muted style={{ fontSize: 13 }}>{strengthReference.reason}</Txt>}
+            {comparison.measurement && <Txt muted style={{ fontSize: 12 }}>Reference body weight: {round(convertWeight(comparison.measurement.weightKg, "kg", data.settings.unit))} {data.settings.unit} measured {formatDate(comparison.measurement.date)}{comparison.measurement.stale ? " (over 28 days old)" : ""}</Txt>}
+            <BenchmarkDetails kind="strength" benchmark={strengthReference} group={referenceGroup} overridden={referenceOverride !== undefined} onGroup={setReferenceOverride} />
+          </View>}
           {history.heaviestSet && <View style={{ padding: 14, borderRadius: 14, backgroundColor: t.accentSoft, gap: 4 }}>
             <Txt style={{ fontSize: 12, color: t.accent, fontWeight: "700" }}>HEAVIEST IN THIS PERIOD</Txt>
             <Txt bold>{round(history.heaviestSet.weight)} {data.settings.unit} × {history.heaviestSet.reps} reps · {formatDate(history.heaviestSet.date)}</Txt>
@@ -149,7 +161,6 @@ export default function Analytics() {
           <Txt muted style={{ fontSize: 12 }}>{loadLabel(history.equipment)}. Ratios describe this exercise and equipment only; they are not population rankings.</Txt>
         </Card>}
       </> : <Txt muted>Record and finish a workout to explore an exercise.</Txt>}
-      <Txt muted style={{ fontSize: 12 }}>Estimated strength uses the Epley formula and is approximate. Exercise, technique, equipment, and rep count affect accuracy. Age and gender remain optional profile context. These charts describe logged training. Current-week totals are partial.</Txt>
     </Screen>
   );
 }

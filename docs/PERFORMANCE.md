@@ -1,5 +1,29 @@
 # Size and efficiency — October 15, 2026
 
+## Settings and offline comparison measurements — October 22, 2026
+
+Measured on Windows with Node.js 24.19.0 and the same pinned dependencies before/after this change. Both production iOS exports succeeded. These are export sizes, not installed IPA/native-binary measurements.
+
+| Metric | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Hermes bundle | 3,199,706 bytes | 3,236,684 bytes | +36,978 bytes (+1.16%) |
+| Complete iOS export | 3,614,243 bytes | 3,651,221 bytes | +36,978 bytes (+1.02%) |
+| Metro modules | 1,377 | 1,386 | +9 |
+| New runtime/native dependencies | — | 0 | None |
+
+The bundled public reference JSON totals 75,901 source bytes: 14,113 body-weight and 61,788 strength. It contains 72 body-weight and 296 strength aggregate cohorts including suppressed rows; no participant/lifter records. There is no runtime data download or added journal storage. Existing SQLite version 5, backup format 2 and Firestore projections are unchanged.
+
+A browser check used temporary summary-call logging, removed before the final export. With Analytics hidden, entering 135 lb × 8 reps, completing its set, and finishing the workout left the counter at its baseline of one. Opening Analytics raised it to two and displayed the fresh completed workout, 1,080 lb × reps volume, and 171 lb estimated strength. Reference lookups use the same frozen screen snapshot and memoization. This confirms browser focus behavior; native app-resume, accessibility and device performance remain pending.
+
+Reproduce export sizes using the same Node runtime and separate output directories:
+```powershell
+npx expo export --platform ios --output-dir dist/analytics-final --max-workers 2
+Get-ChildItem dist/analytics-final -Recurse -File | Measure-Object Length -Sum
+Get-ChildItem dist/analytics-final/_expo/static/js/ios/*.hbc | Select-Object Name, Length
+```
+
+See [benchmark methodology](BENCHMARK_SOURCES.md) for deterministic regeneration, source hashes and actual cohort coverage.
+
 ## Automatic uploads measurements — October 19, 2026
 
 Measured on Windows with Node 24.12.0; storage uses in-memory SQLite and a simulated acknowledgment drain. These numbers do not establish iPhone latency or installed native size.

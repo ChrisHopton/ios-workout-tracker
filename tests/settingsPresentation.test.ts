@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { genderLabel, uploadStatusLabel } from "../src/components/settingsPresentation";
+import { GENDER_OPTIONS, genderLabel, uploadStatusLabel } from "../src/components/settingsPresentation";
 
 test("uploads are only up to date after confirmed sync and the initial history upload", () => {
   assert.equal(uploadStatusLabel({ status: "synced", initialComplete: true, error: null }), "Up to date");
@@ -25,6 +25,15 @@ test("gender labels support unset profiles and preserve unfamiliar legacy values
   assert.equal(genderLabel(""), "Unspecified");
   assert.equal(genderLabel("  "), "Unspecified");
   assert.equal(genderLabel("FEMALE"), "Female");
-  assert.equal(genderLabel(" Prefer not to say "), "Prefer not to say");
+  assert.equal(genderLabel("MALE"), "Male");
+  assert.equal(genderLabel(" Prefer not to say "), " Prefer not to say ");
+  assert.equal(genderLabel("non-binary"), "non-binary");
   assert.equal(genderLabel("Self-described legacy value"), "Self-described legacy value");
+});
+
+test("gender selection only offers female and male, with no unset choice", () => {
+  assert.deepEqual(GENDER_OPTIONS, [
+    { value: "female", label: "Female" },
+    { value: "male", label: "Male" },
+  ]);
 });

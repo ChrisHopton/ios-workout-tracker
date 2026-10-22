@@ -1,4 +1,29 @@
-# Verification report — October 19, 2026
+# Verification report — October 22, 2026
+
+## Simpler Settings and personalized Analytics — October 22, 2026
+
+This source-only release adds local save feedback, compact body-weight entry, and public aggregate comparisons. The gender selector and comparison choices offer Female and Male only. Older custom profile values are preserved until edited. No deployment, OTA publication, native rebuild or owner-cloud configuration change was performed.
+
+| Check | Result |
+| --- | --- |
+| Complete application suite | 304 passed, 0 failed, 1 emulator-only skip |
+| Firestore emulator | 20 passed separately; client read denial and namespace/revision protections retained |
+| Benchmark generator | 11 tests passed; complete regeneration reproduced both tables byte for byte |
+| TypeScript / Expo lint | Passed |
+| Production iOS export | Passed; 1,386 modules, 3,236,684-byte Hermes bundle |
+| Expo compatibility / Doctor | 20/21; patch mismatches: Expo 57.0.29→57.0.31, Router 57.0.27→57.0.29, Sharing 57.0.23→57.0.24 |
+| Browser | Saved-state/edit reset, same-day update, persisted profile/measurement after refresh, Male/Female-only selector, population comparison, optional competitor line, profile-independent override and focus gating verified |
+| Physical iPhone | Still deferred; no native keyboard, VoiceOver, Dynamic Type or app-resume acceptance claimed |
+
+Regression coverage includes delayed and failed local flushes, repeated taps, profile re-enqueue, new backdated entry retry, and optimistic deletion followed by failed persistence/global retry/new save. Same-day measurements retain their identity, historical edits keep duplicate-date checks, and unit changes preserve canonical kilograms.
+
+Benchmark tests cover inclusive age/exclusive size boundaries, sample/effective-count thresholds, explicit wider bands, unavailable demographics, canonical barbell variants, dated/stale measurements, unit conversion, offline lookup and optional chart scaling. Source preprocessing tests cover weighted means, effective counts, exclusions, deduplication, successful meet selection, sparse suppression, pin validation and source row integrity. No demographic benchmark is used by the workout recommendation algorithm.
+
+The browser used synthetic local-only data. At a 430×932 viewport, the compact card and reference line were readable; at 320×740, the weight Save control wrapped below its input. Both palettes were visually inspected using a temporary theme override which was removed afterward. Saving 185 lb then 186 lb on the same date kept one History entry. A 35-year-old male profile at 5 ft 10 in displayed a 198 lb U.S. reference; the supported bench chart displayed its 287 lb competitor reference separately from the 171 lb user estimate. Changing the Analytics reference category did not alter the profile. The browser mock never uploads these fixtures.
+
+Temporary summary instrumentation confirmed no hidden recomputation during recording and one fresh computation on returning to Analytics; details and bundle measurements are in [PERFORMANCE.md](PERFORMANCE.md). All instrumentation and theme overrides were removed. The smaller viewport/browser checks do not substitute for native safe-area or larger Dynamic Type testing.
+
+The three Expo patch warnings remain in the existing [dependency-maintenance follow-up](DEFERRED_WORK.md); no forced or unrelated upgrades were applied. [Benchmark sources](BENCHMARK_SOURCES.md) document pinned public inputs, their limitations and offline regeneration. App Check enforcement, installed-phone upload acceptance and retirement of the former Sheet remain separate deferred rollout steps.
 
 ## Automatic private uploads and Settings — October 19, 2026
 

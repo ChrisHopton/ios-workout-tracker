@@ -6,7 +6,8 @@ import Svg, {
   Text as SvgText,
 } from "react-native-svg";
 import { View } from "react-native";
-import { useTheme } from "./ui";
+import { useTheme, Txt } from "./ui";
+import { ChartReference, chartScale } from "./chartReference";
 export function BarChart({
   values,
   labels,
@@ -79,13 +80,15 @@ export function LineChart({
   values,
   labels,
   description,
+  referenceLine,
 }: {
   values: number[];
   labels: string[];
   description: string;
+  referenceLine?: ChartReference;
 }) {
   const t = useTheme();
-  const max = Math.max(1, ...values);
+  const { max, reference } = chartScale(values, referenceLine);
   const x = (i: number) =>
     values.length === 1 ? 170 : 36 + (i * 270) / (values.length - 1);
   const y = (v: number) => 135 - (v / max) * 108;
@@ -96,7 +99,8 @@ export function LineChart({
       accessibilityLabel={
         description +
         ": " +
-        values.map((v, i) => labels[i] + " " + v).join(", ")
+        values.map((v, i) => labels[i] + " " + v).join(", ") +
+        (reference ? ". Reference: " + reference.label : "")
       }
     >
       <Svg width="100%" height={180} viewBox="0 0 320 180">
@@ -113,6 +117,7 @@ export function LineChart({
         <SvgText x="24" y="30" textAnchor="end" fontSize="10" fill={t.muted}>
           {Math.round(max * 10) / 10}
         </SvgText>
+        {reference && <Line x1="30" x2="312" y1={y(reference.value)} y2={y(reference.value)} stroke={t.muted} strokeWidth="2" strokeDasharray="6 4" />}
         {values.length > 1 && (
           <Polyline
             points={points}
@@ -150,6 +155,7 @@ export function LineChart({
           </>
         )}
       </Svg>
+      {reference && <Txt muted style={{ fontSize: 12 }}>┄ {reference.label}</Txt>}
     </View>
   );
 }
