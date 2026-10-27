@@ -25,6 +25,17 @@ Live setup: the public Firebase app/project configuration matches and anonymous 
 
 SQLite version 5, journal/backup format 2, recommendations, credential identities, revision counters, frozen batches and Firestore document contracts are unchanged.
 
+### Published preview update
+
+Published October 26, 2026 from commit `fe794eb434791742e48f629aff4a3ea7933cdd2e`:
+
+- Channel/branch: `preview`; iOS runtime `fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06`.
+- Update group: `3c25192d-9645-47fc-8985-fb60706a1e08`.
+- iOS update: `01a17b68-9347-752f-ad0d-ef6c75be1c3d`.
+- [EAS release](https://expo.dev/accounts/chrishopton/projects/workout-personal/updates/3c25192d-9645-47fc-8985-fb60706a1e08).
+
+EAS confirmed publication and matching fingerprint. This does not confirm a phone downloaded/applied the update. The owner reported opening Workout online at about 03:20 UTC October 27. Sanitized Firestore verification metrics through 03:32 UTC contained no series; metrics can lag, so no native failure/success is inferred. Enrollment remains closed, service monitoring is UNENFORCED, and physical first-phone attestation, enforcement rejection tests, initial upload and incremental upload remain pending. No user journal or credentials were reset, and no app was uninstalled.
+
 ## Simpler Settings and personalized Analytics — October 22, 2026
 
 This source-only release adds local save feedback, compact body-weight entry, and public aggregate comparisons. The gender selector and comparison choices offer Female and Male only. Older custom profile values are preserved until edited. No deployment, OTA publication, native rebuild or owner-cloud configuration change was performed.
