@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  configureAutomaticServices, isAutomaticOwnerAction, parseAutomaticOwnerArguments, readFirestoreEnforcement, runAutomaticOwnerCommand,
+  configureAutomaticServices, isAutomaticOwnerAction, parseAutomaticOwnerArguments, readFirestoreEnforcement, runAutomaticOwnerCommand, parseBundledFirebaseConfiguration, readAutomaticDiagnostics,
   type AutomaticOwnerBackend, type OwnerInstallation,
 } from "../scripts/firebaseAutomatic";
 
@@ -25,6 +25,7 @@ function owner() {
   let failCheck = false;
   let failDisable = false;
   const backend: AutomaticOwnerBackend = {
+    diagnose: async () => { events.push("diagnose"); return readAutomaticDiagnostics(PROJECT, bundled, credential, responses(diagnosticResponses()).fetcher); },
     configureAutomatic: async (appId, teamId) => { events.push(`configure:${appId}:${teamId}`); },
     firestoreEnforcement: async () => { events.push("check"); if (failCheck) throw new Error("private service response"); return mode; },
     setEnrollmentEnabled: async (enabled) => { events.push(`gate:${enabled}`); gate = enabled; },
@@ -39,7 +40,7 @@ const command = (action: string, ...args: string[]) => parseAutomaticOwnerArgume
 
 test("automatic owner arguments stay separate from legacy create rotate replace and revoke", () => {
   for (const action of ["create", "rotate", "replace", "revoke", undefined]) assert.equal(isAutomaticOwnerAction(action), false);
-  for (const action of ["list", "enable-automatic", "disable-automatic"]) {
+  for (const action of ["diagnose", "list", "enable-automatic", "disable-automatic"]) {
     assert.equal(isAutomaticOwnerAction(action), true);
     assert.equal(command(action).action, action);
     assert.throws(() => command(action, "--uid", UID));
@@ -220,4 +221,120 @@ test("configure stops on wrong app identity or partial API failure without leaki
     });
     assert.equal(request.requests.length, failed + 1);
   }
+});
+
+const BUNDLE_ID = "com.example.workout";
+const bundled = { projectId: PROJECT, appId: APP_ID, bundleId: BUNDLE_ID,
+  projectMatches: true, apiKeyMatches: true, bundleIdentifierMatches: true };
+function diagnosticResponses() {
+  return [
+    { value: { projectId: PROJECT, projectNumber: PROJECT_NUMBER } },
+    { value: { projectId: PROJECT, appId: APP_ID, bundleId: BUNDLE_ID, teamId: TEAM_ID } },
+    { value: { name: `projects/${PROJECT_NUMBER}/apps/${APP_ID}/appAttestConfig`, tokenTtl: "3600s" } },
+    { value: { signIn: { anonymous: { enabled: true }, email: { enabled: true } }, autodeleteAnonymousUsers: false } },
+    { value: { name: SERVICE_NAME, enforcementMode: "ENFORCED" } },
+    { value: { fields: { enabled: { booleanValue: false } } } },
+  ];
+}
+function publicBundle(projectId = PROJECT, apiKey = "fixture-key-" + "a".repeat(30), bundleId = BUNDLE_ID) {
+  const plist = `<plist><dict><key>PROJECT_ID</key><string>${projectId}</string>
+    <key>GOOGLE_APP_ID</key><string>${APP_ID}</string><key>BUNDLE_ID</key><string>${bundleId}</string>
+    <key>API_KEY</key><string>${apiKey}</string></dict></plist>`;
+  return { plist, app: { expo: { ios: { bundleIdentifier: BUNDLE_ID } } }, firebase: { projectId: PROJECT, apiKey: "fixture-key-" + "a".repeat(30) } };
+}
+
+test("diagnose compares public bundle fields without returning API keys and rejects ambiguous plist values", () => {
+  const fixture = publicBundle();
+  const parsed = parseBundledFirebaseConfiguration(fixture.plist, fixture.app, fixture.firebase);
+  assert.deepEqual(parsed, bundled);
+  assert.equal(JSON.stringify(parsed).includes(fixture.firebase.apiKey), false);
+  const mismatched = publicBundle("other-project", "b".repeat(30), "other.bundle");
+  assert.deepEqual(parseBundledFirebaseConfiguration(mismatched.plist, mismatched.app, mismatched.firebase), {
+    ...bundled, projectId: "other-project", bundleId: "other.bundle", projectMatches: false, apiKeyMatches: false, bundleIdentifierMatches: false,
+  });
+  for (const plist of ["broken", fixture.plist.replace("PROJECT_ID", "MISSING"), fixture.plist + `<key>PROJECT_ID</key><string>${PROJECT}</string>`]) {
+    assert.throws(() => parseBundledFirebaseConfiguration(plist, fixture.app, fixture.firebase), /could not be inspected/);
+  }
+  assert.throws(() => parseBundledFirebaseConfiguration(fixture.plist, {}, fixture.firebase), /could not be inspected/);
+});
+
+test("diagnose only reads the exact configuration endpoints and never dispatches a mutation or installation listing", async () => {
+  const request = responses(diagnosticResponses());
+  const result = await readAutomaticDiagnostics(PROJECT, bundled, credential, request.fetcher);
+  assert.deepEqual(result, {
+    projectId: PROJECT,
+    bundledConfiguration: { projectMatches: true, apiKeyMatches: true, bundleIdentifierMatches: true },
+    iosApp: { httpStatus: 200, matchesBundle: true, teamConfigured: true },
+    appAttest: { httpStatus: 200, configured: true, tokenTtlSeconds: 3600 },
+    authentication: { httpStatus: 200, anonymousEnabled: true, emailPasswordEnabled: true, anonymousAutoDeletion: false },
+    firestoreAppCheck: { httpStatus: 200, enforcementMode: "ENFORCED" },
+    automaticEnrollment: { httpStatus: 200, enabled: false },
+    nativeAttestation: "not-checked",
+  });
+  assert.deepEqual(request.requests.map((call) => call.url), [
+    `https://firebase.googleapis.com/v1beta1/projects/${PROJECT}`,
+    `https://firebase.googleapis.com/v1beta1/projects/${PROJECT}/iosApps/${encodeURIComponent(APP_ID)}`,
+    `https://firebaseappcheck.googleapis.com/v1/projects/${PROJECT_NUMBER}/apps/${encodeURIComponent(APP_ID)}/appAttestConfig`,
+    `https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/config`,
+    `https://firebaseappcheck.googleapis.com/v1/${SERVICE_NAME}`,
+    `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents/uploadControl/automaticEnrollment`,
+  ]);
+  for (const call of request.requests) {
+    assert.equal(call.init?.method, "GET");
+    assert.equal(call.init?.body, undefined);
+    assert.equal(call.init?.redirect, "error");
+    assert.ok(call.init?.signal);
+  }
+  const admin = owner();
+  const output = await runAutomaticOwnerCommand(command("diagnose"), admin.backend);
+  assert.deepEqual(JSON.parse(output), result);
+  assert.deepEqual(admin.events, ["diagnose"]);
+  assert.equal(admin.gate(), false);
+  for (const option of ["--uid", "--app-id", "--team-id", "--alias", "--kind"]) assert.throws(() => command("diagnose", option, UID));
+});
+
+test("diagnose keeps missing unknown or mismatched enforcement unknown and never leaks response bodies", async () => {
+  for (const service of [{ name: SERVICE_NAME }, { name: SERVICE_NAME, enforcementMode: "future-mode" },
+    { name: "projects/other/services/firestore.googleapis.com", enforcementMode: "ENFORCED" }]) {
+    const values: { value?: unknown; status?: number; throws?: boolean }[] = diagnosticResponses();
+    values[4] = { value: { ...service, privateValue: "secret-response" } };
+    values[3] = { value: { signIn: {}, privateKey: "private-auth-secret" } };
+    const result = await readAutomaticDiagnostics(PROJECT, bundled, credential, responses(values).fetcher);
+    assert.equal(result.firestoreAppCheck.enforcementMode, "unknown");
+    assert.equal(result.authentication.anonymousEnabled, null);
+    assert.equal(result.authentication.anonymousAutoDeletion, null);
+    for (const secret of ["secret-response", "private-auth-secret", "test-owner-token"]) assert.equal(JSON.stringify(result).includes(secret), false);
+  }
+});
+
+test("diagnose distinguishes missing gate from inaccessible or malformed gate and retains other independent checks", async () => {
+  for (const gate of [
+    { response: { status: 404 }, expected: false },
+    { response: { status: 403 }, expected: null },
+    { response: { throws: true }, expected: null },
+    { response: { value: { fields: { enabled: { stringValue: "true" } } } }, expected: null },
+    { response: { value: { fields: { enabled: { booleanValue: true } } } }, expected: true },
+  ]) {
+    const values: { value?: unknown; status?: number; throws?: boolean }[] = diagnosticResponses();
+    values[5] = gate.response;
+    values[2] = { status: 404 };
+    const result = await readAutomaticDiagnostics(PROJECT, bundled, credential, responses(values).fetcher);
+    assert.equal(result.automaticEnrollment.enabled, gate.expected);
+    assert.equal(result.appAttest.configured, false);
+    assert.equal(result.authentication.anonymousEnabled, true);
+    assert.equal(result.nativeAttestation, "not-checked");
+  }
+});
+
+test("diagnose fails closed before other requests on owner access or project identity failure", async () => {
+  for (const project of [{ value: { projectId: "other-project", projectNumber: PROJECT_NUMBER } }, { status: 403 }, { throws: true }]) {
+    const request = responses([project]);
+    await assert.rejects(readAutomaticDiagnostics(PROJECT, bundled, credential, request.fetcher), /could not verify owner access and project identity/);
+    assert.equal(request.requests.length, 1);
+  }
+  const request = responses([]);
+  await assert.rejects(readAutomaticDiagnostics(PROJECT, bundled, {
+    getAccessToken: async () => { throw new Error("private-refresh-secret"); },
+  }, request.fetcher), (error: unknown) => error instanceof Error && !error.message.includes("private-refresh-secret"));
+  assert.equal(request.requests.length, 0);
 });

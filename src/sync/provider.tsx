@@ -16,11 +16,11 @@ import {
   saveCredentials,
   removeCredentials,
 } from "./credentials";
-import { SyncError } from "./transport";
+import { createUploadStartup } from "./startup";
 import { createUploadRuntime } from "./runtime";
 import { createAutomaticBootstrap } from "./bootstrap";
 
-const Context = createContext<SyncController | null>(null);
+const Context = createContext<{ controller: SyncController; retry: () => void } | null>(null);
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const { data, status } = useApp();
   const previous = useRef(data);
@@ -41,49 +41,20 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         { createInstallationId: () => Crypto.randomUUID() },
       ),
   );
+  const startup = useRef<ReturnType<typeof createUploadStartup> | null>(null);
+  const [context] = useState(() => ({ controller, retry: () => startup.current?.retry() }));
   useEffect(() => {
-    let mounted = true;
-    let ready = false;
-    let running = false;
-    let blocked = false;
-    let active = AppState.currentState === "active" || Platform.OS === "web";
-    let retryDelay = 15_000;
-    let retryAt = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const clear = () => { if (timer) clearTimeout(timer); timer = undefined; };
-    async function start() {
-      if (!mounted || !active || ready || running || blocked) return;
-      clear();
-      if (Date.now() < retryAt) { timer = setTimeout(() => void start(), retryAt - Date.now()); return; }
-      running = true;
-      try {
-        if (await bootstrap(() => mounted && active)) {
-          if (!mounted) return;
-          if (!await controller.initialize()) throw new SyncError("The saved upload connection could not be loaded. Your workouts remain on this phone.", true, "storage");
-          ready = true;
-        }
-      } catch (error) {
-        if (!mounted) return;
-        controller.reportStartupError(error);
-        if (!(error instanceof SyncError) || error.retryable) {
-          retryAt = Math.max(Date.now() + retryDelay, error instanceof SyncError ? error.retryAt ?? 0 : 0);
-          retryDelay = Math.min(retryDelay * 2, 300_000);
-        } else blocked = true;
-      } finally {
-        running = false;
-        // A resume can arrive while setup is finishing in the background.
-        if (mounted && active && !ready && !blocked && !timer)
-          timer = setTimeout(() => void start(), Math.max(0, retryAt - Date.now()));
-      }
-    }
-    controller.setActive(active);
-    void start();
-    const subscription = AppState.addEventListener("change", (state) => {
-      active = state === "active";
-      controller.setActive(active);
-      if (active) void start(); else clear();
+    const runner = createUploadStartup({
+      bootstrap, initialize: () => controller.initialize(),
+      started: () => controller.reportSetupStarted(),
+      failed: (error, retryAt) => controller.reportStartupError(error, retryAt),
+      retryUpload: () => controller.retry(),
     });
-    return () => { mounted = false; clear(); subscription.remove(); controller.setActive(false); };
+    startup.current = runner;
+    const setActive = (active: boolean) => { controller.setActive(active); runner.setActive(active); };
+    setActive(AppState.currentState === "active" || Platform.OS === "web");
+    const subscription = AppState.addEventListener("change", (state) => setActive(state === "active"));
+    return () => { runner.dispose(); startup.current = null; subscription.remove(); controller.setActive(false); };
   }, [bootstrap, controller]);
   useEffect(() => {
     if (status !== "saved" || previous.current === data) return;
@@ -97,15 +68,16 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     previous.current = data;
     controller.changed(finished);
   }, [controller, data, status]);
-  return <Context.Provider value={controller}>{children}</Context.Provider>;
+  return <Context.Provider value={context}>{children}</Context.Provider>;
 }
 export function useSync() {
-  const controller = useContext(Context);
-  if (!controller) throw new Error("SyncProvider is required");
+  const context = useContext(Context);
+  if (!context) throw new Error("SyncProvider is required");
+  const { controller, retry } = context;
   const state = useSyncExternalStore(
     (listener) => controller.subscribe(listener),
     () => controller.getSnapshot(),
     () => controller.getSnapshot(),
   );
-  return { state, controller };
+  return { state, controller, retry };
 }

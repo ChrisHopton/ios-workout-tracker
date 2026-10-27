@@ -2,9 +2,9 @@
 
 The `preview` profile creates a standalone private iPhone app with its JavaScript and assets bundled. After installation, recording and analytics work offline with your Windows PC switched off. This is an EAS internal distribution build. [Expo's preview-build guide](https://docs.expo.dev/tutorial/eas/internal-distribution-builds/)
 
-This release adds native Firebase App Check with production App Attest. **Both phones need a new native installation; OTA cannot add these modules. Install over Workout using the same Apple team and bundle identifier to retain local history. Do not uninstall.**
+Native Firebase App Check with production App Attest requires a binary containing those modules. A phone that lacks them needs a new native installation; OTA cannot add them. **Install over Workout using the same Apple team and bundle identifier to retain local history. Do not uninstall.**
 
-The app automatically identifies installations using the model and a stable suffix. No phone code, account sign-in, or database controls appear in Settings. Existing connected installations keep their private identity and queued history. The browser uses a local mock only.
+The app identifies installations using the model and a stable suffix. Settings has no phone-code or account sign-in form. Expand **Uploads** for status, retry information and installation diagnostics. Existing connected installations retain their private identity and queued history. The browser uses a local mock only.
 
 ## 1. Accounts and prerequisites
 
@@ -58,15 +58,17 @@ Stop the PC's development server and test Workout in airplane mode. Create a pla
 
 ## Automatic private uploads and staged rollout
 
-The owner follows [Firestore setup](FIREBASE.md). Public Firebase configuration is bundled; anonymous refresh tokens stay in device-only Keychain storage. Settings shows a read-only upload status and explains that data uploads to the owner's private database. Local **Saved** remains independent.
+The owner follows [Firestore setup](FIREBASE.md). Public Firebase configuration is bundled; anonymous refresh tokens stay in device-only Keychain storage. Settings shows an **Uploads** status row. Expand it for pending changes, last upload, initial-history progress, a problem explanation and Retry when available. Local **Saved** remains independent; this row does not establish that the installed phone has passed the rollout checks.
 
 Before enabling automatic enrollment, install the App Check build on both phones and open each online. Verify production App Attest tokens in Firebase App Check metrics. Then enforce App Check for Firestore, verify missing/invalid tokens are rejected by the real service, and run the documented owner command to enable enrollment. Until that sequence finishes, a new installation can record locally while uploads wait. Do not enforce App Check while either phone still needs the old binary for uploads.
 
 After enabling, keep each phone open online until the initial history finishes. Verify separate UID namespaces, the completion marker, and a subsequent incremental edit from both phones in the owner console. All client reads stay denied. Firestore is an owner reporting copy; it never restores app data.
 
-## Verify this release
+## Check the interface
 
-Home's **+** opens **Workout Plans**. Create and edit there, choose Weekly or Every 2 weeks, and review the dated two-week preview. Existing custom schedules remain unchanged until their recurrence is explicitly changed. Record working and optional warm-up sets, then check the next-workout recommendation in read-only Analytics. Enter optional body-weight measurements only in Settings; expand **Adjust weight increments** when needed. No effort rating is required.
+On Home, pick a date in the seven-day strip and use the single workout card to start, resume or view a session. **Plans** in the header opens **Workout Plans**. Rest days offer **Choose workout**; future dates remain view-only. Create and edit plans, choose Weekly or Every 2 weeks, and review the dated two-week preview. Existing custom schedules remain unchanged until their recurrence is explicitly changed.
+
+Analytics opens at eight weeks with two totals, a weekly workout chart and recent exercise rows. Use **See all** to find an exercise, then review its metric chart and personal best. Workout history and relative strength expand on demand. Muscle groups and volume are under **Training details**; body-weight references are under **Comparisons**. The next-workout card is no longer part of Analytics. Record working and optional warm-up sets in the workout screen; enter optional body-weight measurements in Settings. No effort rating is required.
 
 Install over the existing app rather than uninstalling so the version 5 migration can preserve its journal, credentials, and in-flight uploads. The current interface has no JSON backup/import/export or cloud restore workflow. Earlier release notes about those controls describe the prior interface; underlying versioned validation and internal migration safeguards remain.
 
@@ -78,7 +80,9 @@ Install native updates over the existing app using the same bundle identifier an
 npx eas-cli@latest update --channel preview --environment preview --platform ios --message "Workout interface update"
 ```
 
-Only compatible builds receive the update; native dependency or runtime changes require a new preview build. This guide does not publish an update or establish that the installed phone supports OTA. Native builds, credentials, and device validation remain owner steps. [EAS Update](https://docs.expo.dev/eas-update/getting-started/) · [Update environments](https://docs.expo.dev/eas/environment-variables/usage/#using-environment-variables-with-eas-update)
+The installed iOS build and update must have the same runtime fingerprint, and the build must request the preview channel. Matching the app version alone is insufficient. Native dependency, configuration or other fingerprint changes require a compatible new preview build. The command above is guidance, not evidence of publication or installation. [Runtime compatibility](https://docs.expo.dev/eas-update/runtime-versions/) · [Update environments](https://docs.expo.dev/eas/environment-variables/usage/#using-environment-variables-with-eas-update)
+
+After the owner publishes a compatible update, open Workout online and allow it to download. Once local edits show **Saved**, close and reopen the app to load the downloaded update. Expand **Settings > Uploads** to check Channel, Runtime and Update against the owner's published update details. A browser preview or bundle export does not prove that a phone has installed an update. [Expo update loading](https://docs.expo.dev/eas-update/download-updates/)
 
 Ad hoc signing is not permanent. Inspect the actual provisioning/certificate expiration dates with:
 
@@ -112,8 +116,8 @@ Expo Go cannot load this app's native Firebase modules. Use a development build 
 If installation fails, check iOS version, selected UDID, Developer Mode, Apple device-processing status, and signing expiry. If the app asks for a development server, install a `preview` build. Keep the existing installation when troubleshooting so its local data remains available.
 
 
-## October 22 Settings and offline comparisons
+## Settings and offline comparisons
 
-This change adds no native dependency. Its JavaScript and bundled reference tables can use an OTA update only on an installed binary with the matching runtime. It does not replace the new App Check native installation or the pending attestation/enforcement rollout described above. No update was published during source delivery.
+Interface changes and bundled reference tables can use OTA only when the installed binary has the matching runtime. They do not replace required native App Check modules or the attestation/enforcement rollout described above.
 
-Install updates over the existing app to preserve local workouts. In Settings, choose Female or Male and save the profile; the button confirms ✓ Saved after local persistence. Record body weight using the compact input; entering another value today updates today’s record. Expand Change date or History only when needed. Analytics uses downloaded-at-build-time aggregate tables offline; phones never request benchmark or workout records from Firestore. The optional competitor line appears under Estimated strength for barbell squat, bench press and deadlift.
+Install updates over the existing app to preserve local workouts. In Settings, choose Female or Male and save the profile; the button confirms ✓ Saved after local persistence. Record body weight using the compact input; entering another value today updates today’s record. Expand Change date or History only when needed. Analytics uses downloaded-at-build-time aggregate tables offline; phones never request benchmark or workout records from Firestore. The optional competitor line appears under Estimated max for barbell squat, bench press and deadlift.

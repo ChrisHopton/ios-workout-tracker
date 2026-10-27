@@ -1,5 +1,11 @@
 # Size and efficiency — October 15, 2026
 
+## Simpler-screen measurements — October 26, 2026
+
+Windows production exports using the same pinned dependencies: Hermes changed from 3,236,684 to 3,278,364 bytes (+41,680; 1.29%). The complete export changed from 3,651,221 to 3,692,901 bytes (+41,680; 1.14%). No runtime or native dependency was added. These measure JavaScript/assets, not installed IPA size or phone latency.
+
+The Analytics provider retains a shared immutable snapshot across overview/detail routes. A temporary browser summary counter stayed at one through a hidden recording edit and finish, then became two on returning to Analytics with the new result visible. Period and search selections survived detail navigation; the overview remained mounted with its scroll position. Instrumentation was removed. Native resume and larger-text acceptance remain device checks.
+
 ## Settings and offline comparison measurements — October 22, 2026
 
 Measured on Windows with Node.js 24.19.0 and the same pinned dependencies before/after this change. Both production iOS exports succeeded. These are export sizes, not installed IPA/native-binary measurements.

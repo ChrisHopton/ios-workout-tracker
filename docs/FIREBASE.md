@@ -24,6 +24,19 @@ The ADC contains an owner refresh token. Keep it outside Git, shared folders, sc
 
 An existing approved ADC workflow can also be used. See [local owner ADC](https://firebase.google.com/docs/admin/setup#test_with_gcloud_end_user_credentials) and [service-account impersonation ADC](https://cloud.google.com/docs/authentication/set-up-adc-local-dev-environment#sa-impersonation).
 
+## Inspect upload configuration without changes
+
+Use the existing private owner ADC and the read-only diagnostic:
+
+```powershell
+$env:GOOGLE_APPLICATION_CREDENTIALS = "$env:USERPROFILE\.workout-sync\firebase-owner-adc.json"
+npm run firebase:setup -- diagnose --project YOUR_FIREBASE_PROJECT_ID
+```
+
+`diagnose` compares the bundled plist, app bundle identifier, and public Firebase configuration, then reads the selected project's iOS app, Apple team presence, App Attest configuration, Authentication provider flags, Firestore App Check enforcement, and enrollment gate. Its JSON output contains only configuration comparisons, flags, status codes, and token lifetime. It does not return API keys, tokens, credentials, installation identities, or personal records, and does not change settings. Unlike `list`, it never reads profile records.
+
+An absent gate reports `enabled: false`; inaccessible or malformed values report `null`. Missing, unfamiliar, or mismatched App Check enforcement reports `unknown`, never verified enforcement. Other `null` fields mean the value could not be established. These diagnostics do not relax the guarded `enable-automatic` command: only exact verified `ENFORCED` permits it to open enrollment. `nativeAttestation: "not-checked"` is deliberate: server configuration cannot prove that either installed phone obtained a valid production token. Complete the physical-phone checks below before enforcement or activation.
+
 ## Configure automatic uploads without opening enrollment
 
 After registering the native iOS app, run:
@@ -51,6 +64,8 @@ The emulator requires a supported JDK and uses only `demo-workout-sync` at `127.
 The new rules preserve legacy uploads and deny automatic enrollment unless the owner-only document `uploadControl/automaticEnrollment` contains `enabled: true`. An absent document or false value closes the gate. App users cannot read or edit it. Deploying rules does not open the gate.
 
 ## Safe rollout order
+
+Before checking phone metrics, enable monitoring-only mode (UNENFORCED) for Cloud Firestore App Check. An unconfigured service defaults to OFF and collects no verification metrics. Keep automatic enrollment closed during monitoring; only valid production phone evidence, confirmed enforcement and negative-token checks justify opening it. See [enforcement modes](https://firebase.google.com/docs/reference/appcheck/rest/v1/EnforcementMode).
 
 1. Keep automatic enrollment closed. The default absent gate is closed; explicitly close it with `disable-automatic` when updating an already configured project.
 2. Configure the native iOS app, App Attest, and anonymous Authentication. Build and install the new signed binary over existing installations to preserve their local journals.

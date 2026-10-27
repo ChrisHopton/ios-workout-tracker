@@ -1,5 +1,30 @@
 # Verification report — October 22, 2026
 
+## Simpler screens and upload diagnostics — October 26, 2026
+
+Home now has one date header, a selectable week strip, one Plans entry, and one workout action. Analytics has two totals, a weekly workout chart, recent exercises and focused detail routes. Settings keeps save feedback and exposes upload diagnostics only when the Uploads row is expanded.
+
+| Check | Result |
+| --- | --- |
+| Complete application suite | 328 passed, 0 failed, 1 emulator-only skip (329 total) |
+| Firestore emulator | 20 passed; enrollment, read denial, cross-account isolation, revision and retry protections retained |
+| TypeScript / Expo lint | Passed |
+| Production iOS export | Passed; 3,278,364-byte Hermes bundle; 3,692,901 bytes complete export |
+| Expo Doctor | 20/21; existing Expo, Router and Sharing patch warnings retained to avoid changing the installed native runtime |
+| Runtime compatibility | Current fingerprint fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06 matches October 22 preview build 00474cfc-0dd6-45d3-ada1-f19e7e2b7e3a |
+| Browser | Rest-day chooser, completed workout, recent exercise drill-down, retained 12-week period/search, optional competitor line, compact Uploads disclosure verified |
+| Native acceptance | First-phone upload rollout in progress; second phone and native accessibility/keyboard acceptance remain pending |
+
+New regressions cover typed status/retry presentation, setup interruption, single-flight retries, terminal identities, quota deadlines, immutable upload retries, preserved startup retry timing after local edits, Home action selection and recent exercise routing. The owner diagnostic performs GET-only configuration checks and prints sanitized flags; unknown enforcement is never represented as verified.
+
+Temporary browser instrumentation confirmed one summary at baseline, no additional summaries while editing and finishing a recorded workout with Analytics hidden, and exactly one fresh summary when returning. The latest row then showed the edited 140 lb × 8 result. Instrumentation was removed before release. Synthetic browser data stays on the mock transport.
+
+Checked narrow 320-pixel and 375-pixel layouts and 430-pixel Pro Max sizing in the browser. The narrow week strip scrolls instead of shrinking 44-point date controls. Browser checks do not establish physical iOS safe-area, VoiceOver, Dynamic Type, light-mode or native keyboard acceptance.
+
+Live setup: the public Firebase app/project configuration matches and anonymous authentication/App Attest are configured. Automatic enrollment is still closed. At 03:21:35 UTC on October 27 (October 26 local), Firestore App Check monitoring was explicitly set to UNENFORCED because the unconfigured default collects no metrics. Enforcement, valid first-phone attestation, initial-history completion and a subsequent edit must be recorded separately before rollout is called complete. Missing earlier metrics are not proof of an app failure.
+
+SQLite version 5, journal/backup format 2, recommendations, credential identities, revision counters, frozen batches and Firestore document contracts are unchanged.
+
 ## Simpler Settings and personalized Analytics — October 22, 2026
 
 This source-only release adds local save feedback, compact body-weight entry, and public aggregate comparisons. The gender selector and comparison choices offer Female and Male only. Older custom profile values are preserved until edited. No deployment, OTA publication, native rebuild or owner-cloud configuration change was performed.

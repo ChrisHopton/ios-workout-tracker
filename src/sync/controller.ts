@@ -8,7 +8,7 @@ import {
   type SyncIdentity,
   type UploadBatch,
 } from "./protocol";
-import { makeCommitBody, SyncError, validateResponse, type SyncRequest, type SyncTransport } from "./transport";
+import { makeCommitBody, SyncError, validateResponse, type SyncErrorKind, type SyncRequest, type SyncTransport } from "./transport";
 
 export interface SyncLocalState extends SyncIdentity {
   installationId: string;
@@ -47,6 +47,10 @@ export interface SyncViewState {
   bound: boolean;
   initialComplete: boolean;
   pausedUntil: string | null;
+  phase: "setup" | "enrollment" | "upload" | "idle";
+  errorKind: SyncErrorKind | null;
+  retryable: boolean;
+  nextRetryAt: string | null;
 }
 export interface SyncControllerOptions {
   now?: () => number;
@@ -57,6 +61,7 @@ export interface SyncControllerOptions {
 export const DISCONNECTED_SYNC_STATE: SyncViewState = {
   status: "disconnected", deviceLabel: "", pending: 0, lastSyncedAt: null,
   error: null, busy: false, bound: false, initialComplete: false, pausedUntil: null,
+  phase: "setup", errorKind: null, retryable: false, nextRetryAt: null,
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -122,9 +127,22 @@ export class SyncController {
     return () => this.listeners.delete(listener);
   };
 
-  reportStartupError(error: unknown): void {
+  reportSetupStarted(): void {
+    this.publish({ status: "pending", phase: "setup", busy: true, error: null,
+      errorKind: null, retryable: false, nextRetryAt: null });
+  }
+
+  reportStartupError(error: unknown, retryAt: number | null = null): void {
     const safe = safeError(error);
-    this.publish({ status: "error", error: safe.message, busy: false });
+    this.publish({ status: "error", phase: "setup", error: safe.message, busy: false,
+      errorKind: safe.kind, retryable: safe.retryable,
+      nextRetryAt: retryAt === null ? null : new Date(retryAt).toISOString() });
+  }
+
+  /** User retries use the same scheduler and cannot bypass backoff, quota, or revocation. */
+  retry(): void {
+    if (this.snapshot.retryable && !this.blockedError && !this.syncPromise)
+      this.scheduleAt(this.now());
   }
 
   initialize(): Promise<boolean> {
@@ -188,7 +206,9 @@ export class SyncController {
     this.clearSchedule();
     return this.control(async () => {
       const previous = {
-        credentials: this.credentials, error: this.snapshot.error, blockedError: this.blockedError,
+        credentials: this.credentials, error: this.snapshot.error,
+        errorKind: this.snapshot.errorKind, retryable: this.snapshot.retryable,
+        nextRetryAt: this.snapshot.nextRetryAt, blockedError: this.blockedError,
         retryAt: this.retryAt, quotaUntil: this.quotaUntil, retryDelay: this.retryDelay,
       };
       let restoreSecrets = false;
@@ -244,6 +264,7 @@ export class SyncController {
             this.retryAt = previous.retryAt;
             this.quotaUntil = previous.quotaUntil;
             this.retryDelay = previous.retryDelay;
+            this.publish({ errorKind: previous.errorKind, retryable: previous.retryable, nextRetryAt: previous.nextRetryAt });
             await this.refresh(this.generation, previous.error).catch(() => undefined);
             if (this.credentials) {
               this.scheduleAt(resumeAt ?? this.now());
@@ -413,6 +434,10 @@ export class SyncController {
       bound,
       initialComplete: bound && state!.initialComplete,
       error: message,
+      ...(message === null ? { errorKind: null, retryable: false } : {}),
+      phase: !connected ? "setup" : !bound ? "enrollment" : this.snapshot.status === "syncing" && this.syncPromise ? "upload" : "idle",
+      nextRetryAt: !connected && this.snapshot.phase === "setup" && message ? this.snapshot.nextRetryAt :
+        this.retryAt !== null && this.retryAt > this.now() ? new Date(this.retryAt).toISOString() : null,
       pausedUntil: paused ? new Date(this.quotaUntil!).toISOString() : null,
       status: !connected ? "disconnected" : paused ? "paused" : message ? "error" :
         this.snapshot.status === "syncing" && this.syncPromise ? "syncing" :
@@ -429,6 +454,7 @@ export class SyncController {
     const due = Math.max(time, this.retryAt ?? time, this.quotaUntil ?? time);
     this.clearSchedule();
     this.timerAt = due;
+    if (this.snapshot.error && this.snapshot.retryable) this.publish({ nextRetryAt: new Date(due).toISOString() });
     this.timer = this.schedule(() => {
       this.timerAt = null;
       this.timer = undefined;
@@ -444,6 +470,7 @@ export class SyncController {
       return;
     }
     if (!error.retryable) this.blockedError = error.message;
+    this.publish({ errorKind: error.kind, retryable: error.retryable, nextRetryAt: null });
     if (error.kind === "quota") {
       this.quotaUntil = Math.max(error.retryAt ?? this.now() + 300_000, this.now() + 1);
       this.retryAt = this.quotaUntil;
@@ -487,6 +514,7 @@ export class SyncController {
         this.checkStaged(staged!, credentials);
         await this.reserve(1);
         if (!this.current(generation) || !this.active) return;
+        this.publish({ phase: "enrollment", status: "syncing", error: null, errorKind: null, retryable: false, nextRetryAt: null });
         const request: SyncRequest = { action: "bind", installationId: staged!.installationId };
         validateResponse(request, await this.transport(request, credentials, () => this.active && this.current(generation)));
 
@@ -502,7 +530,7 @@ export class SyncController {
       this.checkStaged(state, credentials);
       this.retryAt = null;
       this.firstChangeAt = null;
-      this.publish({ status: "syncing", error: null, pausedUntil: null });
+      this.publish({ status: "syncing", phase: "upload", error: null, errorKind: null, retryable: false, nextRetryAt: null, pausedUntil: null });
       for (let index = 0; index < 100; index++) {
         if (!this.current(generation) || !this.active) return;
         const batch = await this.repository.inFlight();
@@ -523,6 +551,7 @@ export class SyncController {
         ));
         if (!this.current(generation) || !this.active) return;
         await this.repository.acknowledge(batch.id, receipt.acknowledged, new Date(this.now()).toISOString());
+        await this.refresh(generation, null);
         if (index === 99) this.runAgain = true;
       }
       if (!this.current(generation)) return;
@@ -532,6 +561,7 @@ export class SyncController {
       await this.refresh(generation, null);
       this.publish({
         status: this.snapshot.pending > 0 || !this.snapshot.initialComplete ? "pending" : "synced",
+        phase: "idle", nextRetryAt: null,
       });
     } catch (error) {
       if (!this.current(generation)) return;

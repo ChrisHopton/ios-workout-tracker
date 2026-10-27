@@ -12,8 +12,8 @@ interface ReferenceControls {
   overridden: boolean;
   onGroup: (group: ReferenceGroup | null | undefined) => void;
 }
-export function BenchmarkDetails({ kind, benchmark, group, overridden, onGroup }: ReferenceControls & {
-  kind: "body" | "strength"; benchmark: Benchmark;
+export function BenchmarkDetails({ kind, benchmark, group, overridden, onGroup, measurement, unit }: ReferenceControls & {
+  kind: "body" | "strength"; benchmark: Benchmark; measurement?: (BodyWeightEntry & { stale: boolean }) | null; unit?: Unit;
 }) {
   const [open, setOpen] = useState(false);
   const t = useTheme();
@@ -35,7 +35,9 @@ export function BenchmarkDetails({ kind, benchmark, group, overridden, onGroup }
         <Txt style={{ fontSize: 13 }}>{cohortLabel(benchmark.cohort, kind === "body" ? "height" : "weight")}</Txt>
         <Txt muted style={{ fontSize: 12 }}>{benchmark.cohort.count.toLocaleString()} {kind === "body" ? "respondents" : "distinct lifters"}{benchmark.widerBand ? " · wider matching band because the narrower sample was too small" : ""}</Txt>
       </>}
+      {measurement && unit && <Txt muted style={{ fontSize: 12 }}>Reference body weight: {Math.round(convertWeight(measurement.weightKg, "kg", unit) * 100) / 100} {unit} measured {formatDate(measurement.date)}{measurement.stale ? " (over 28 days old)" : ""}</Txt>}
       {kind === "body" ? <>
+        <Txt muted style={{ fontSize: 12 }}>Body weight and population averages alone cannot assess health.</Txt>
         <Txt muted style={{ fontSize: 12 }}>NHANES August 2021–August 2023 · U.S. civilian, noninstitutionalized adults. Survey-weighted mean, matched by age, reference group and height; reported pregnancy excluded. At least 100 respondents and a weight-based effective count of 50 are required. These are descriptive safeguards, not statistical certainty or a healthy-weight target.</Txt>
         <Link href="https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2021/DataFiles/BMX_L.htm" style={{ color: t.accent, fontSize: 13 }}>CDC NHANES source and methodology</Link>
         <Txt muted style={{ fontSize: 12 }}>Adapted from public CDC data, available free from CDC. CDC does not endorse this app or its calculations.</Txt>
@@ -61,7 +63,6 @@ export function BodyWeightComparison({ benchmark, measurement, unit, ...controls
       <Txt muted style={{ fontSize: 12 }}>Measured {formatDate(measurement.date, { month: "short", day: "numeric", year: "numeric" })}{measurement.stale ? " · over 28 days old" : ""}</Txt>
       {!benchmark.available && <Txt muted style={{ fontSize: 13 }}>{benchmark.reason}</Txt>}
     </> : <Txt muted style={{ fontSize: 13 }}>Add body weight in Settings to compare.</Txt>}
-    <Txt muted style={{ fontSize: 12 }}>Body weight and population averages alone cannot assess health.</Txt>
     <BenchmarkDetails kind="body" benchmark={benchmark} {...controls} />
   </Card>;
 }

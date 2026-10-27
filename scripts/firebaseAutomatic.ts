@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { FIREBASE_CONFIG } from "../src/sync/firebaseConfig";
 import type { Credential } from "firebase-admin/app";
 
 export type InstallationKind = "automatic" | "legacy";
@@ -13,6 +17,7 @@ export interface OwnerInstallation {
   alias: string | null;
 }
 export interface AutomaticOwnerBackend {
+  diagnose(): Promise<AutomaticDiagnostics>;
   firestoreEnforcement(): Promise<string>;
   configureAutomatic(appId: string, teamId: string): Promise<void>;
   setEnrollmentEnabled(enabled: boolean): Promise<void>;
@@ -23,7 +28,7 @@ export interface AutomaticOwnerBackend {
 }
 export class OwnerManagementError extends Error {}
 export type AutomaticOwnerArguments = {
-  action: "list" | "alias" | "revoke-automatic" | "enable-automatic" | "disable-automatic" | "configure-automatic";
+  action: "diagnose" | "list" | "alias" | "revoke-automatic" | "enable-automatic" | "disable-automatic" | "configure-automatic";
   projectId: string;
   uid?: string;
   kind?: InstallationKind;
@@ -31,7 +36,7 @@ export type AutomaticOwnerArguments = {
   appId?: string;
   teamId?: string;
 };
-const ACTIONS = ["list", "alias", "revoke-automatic", "enable-automatic", "disable-automatic", "configure-automatic"] as const;
+const ACTIONS = ["diagnose", "list", "alias", "revoke-automatic", "enable-automatic", "disable-automatic", "configure-automatic"] as const;
 const PROJECT = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 const APP_ID = /^[A-Za-z0-9:._-]{1,200}$/;
 const TEAM_ID = /^[A-Z0-9]{10}$/;
@@ -129,6 +134,137 @@ export async function readFirestoreEnforcement(
     throw new OwnerManagementError("Firestore App Check enforcement could not be verified; automatic enrollment was not enabled");
   }
 }
+
+export interface BundledFirebaseConfiguration {
+  projectId: string;
+  appId: string;
+  bundleId: string;
+  projectMatches: boolean;
+  apiKeyMatches: boolean;
+  bundleIdentifierMatches: boolean;
+}
+export interface AutomaticDiagnostics {
+  projectId: string;
+  bundledConfiguration: {
+    projectMatches: boolean;
+    apiKeyMatches: boolean;
+    bundleIdentifierMatches: boolean;
+  };
+  iosApp: { httpStatus: number | null; matchesBundle: boolean | null; teamConfigured: boolean | null };
+  appAttest: { httpStatus: number | null; configured: boolean | null; tokenTtlSeconds: number | null };
+  authentication: {
+    httpStatus: number | null;
+    anonymousEnabled: boolean | null;
+    emailPasswordEnabled: boolean | null;
+    anonymousAutoDeletion: boolean | null;
+  };
+  firestoreAppCheck: { httpStatus: number | null; enforcementMode: "ENFORCED" | "UNENFORCED" | "OFF" | "unknown" };
+  automaticEnrollment: { httpStatus: number | null; enabled: boolean | null };
+  nativeAttestation: "not-checked";
+}
+
+/** Extract only public bundle identifiers and comparisons; API keys never leave this helper. */
+export function parseBundledFirebaseConfiguration(
+  plist: string, appConfiguration: unknown, firebaseConfiguration: unknown,
+): BundledFirebaseConfiguration {
+  try {
+    const field = (key: string): string => {
+      const values = [...plist.matchAll(new RegExp('<key>' + key + '</key>\\s*<string>([^<]+)</string>', 'g'))];
+      if (values.length !== 1) throw new Error();
+      return values[0][1];
+    };
+    const projectId = field("PROJECT_ID");
+    const appId = field("GOOGLE_APP_ID");
+    const bundleId = field("BUNDLE_ID");
+    const apiKey = field("API_KEY");
+    if (!PROJECT.test(projectId) || !APP_ID.test(appId) || !/^[A-Za-z0-9.-]{1,200}$/.test(bundleId) ||
+        !/^[A-Za-z0-9_-]{20,128}$/.test(apiKey) || !object(appConfiguration) || !object(appConfiguration.expo) ||
+        !object(appConfiguration.expo.ios) || !object(firebaseConfiguration) ||
+        typeof appConfiguration.expo.ios.bundleIdentifier !== "string" || typeof firebaseConfiguration.projectId !== "string" ||
+        typeof firebaseConfiguration.apiKey !== "string") throw new Error();
+    return {
+      projectId, appId, bundleId,
+      projectMatches: firebaseConfiguration.projectId === projectId,
+      apiKeyMatches: firebaseConfiguration.apiKey === apiKey,
+      bundleIdentifierMatches: appConfiguration.expo.ios.bundleIdentifier === bundleId,
+    };
+  } catch {
+    throw new OwnerManagementError("Bundled Firebase configuration could not be inspected; check the plist and app configuration");
+  }
+}
+
+/** GET-only configuration inspection. Never accesses installation, profile, or workout records. */
+export async function readAutomaticDiagnostics(
+  projectId: string,
+  bundled: BundledFirebaseConfiguration,
+  credential: Pick<Credential, "getAccessToken">,
+  fetcher: typeof fetch = globalThis.fetch,
+): Promise<AutomaticDiagnostics> {
+  if (!PROJECT.test(projectId) || !PROJECT.test(bundled.projectId) || !APP_ID.test(bundled.appId)) {
+    throw new OwnerManagementError("Provide valid project and bundled iOS app identifiers");
+  }
+  try {
+    const token = await credential.getAccessToken();
+    if (typeof token.access_token !== "string" || !/^[!-~]{1,16384}$/.test(token.access_token)) throw new Error();
+    const get = async (url: string): Promise<{ httpStatus: number | null; body: unknown }> => {
+      try {
+        const response = await fetcher(url, {
+          method: "GET", redirect: "error", signal: AbortSignal.timeout(20_000),
+          headers: { Authorization: `Bearer ${token.access_token}` },
+        });
+        return { httpStatus: response.status, body: response.ok ? await response.json() : null };
+      } catch { return { httpStatus: null, body: null }; }
+    };
+    const project = await get(`https://firebase.googleapis.com/v1beta1/projects/${projectId}`);
+    if (!object(project.body) || project.body.projectId !== projectId || typeof project.body.projectNumber !== "string" ||
+        !/^[0-9]+$/.test(project.body.projectNumber)) throw new Error();
+    const number = project.body.projectNumber;
+    const appName = `projects/${number}/apps/${bundled.appId}/appAttestConfig`;
+    const serviceName = `projects/${number}/services/firestore.googleapis.com`;
+    const [app, attest, auth, service, gate] = await Promise.all([
+      get(`https://firebase.googleapis.com/v1beta1/projects/${projectId}/iosApps/${encodeURIComponent(bundled.appId)}`),
+      get(`https://firebaseappcheck.googleapis.com/v1/projects/${number}/apps/${encodeURIComponent(bundled.appId)}/appAttestConfig`),
+      get(`https://identitytoolkit.googleapis.com/admin/v2/projects/${projectId}/config`),
+      get(`https://firebaseappcheck.googleapis.com/v1/${serviceName}`),
+      get(`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${AUTOMATIC_ENROLLMENT_CONTROL}`),
+    ]);
+    const appMatches = object(app.body) ? app.body.projectId === projectId && app.body.appId === bundled.appId &&
+      app.body.bundleId === bundled.bundleId : null;
+    const attestMatches = object(attest.body) ? attest.body.name === appName : null;
+    const authBody = object(auth.body) ? auth.body : {};
+    const signIn = object(authBody.signIn) ? authBody.signIn : {};
+    const boolean = (value: unknown) => typeof value === "boolean" ? value : null;
+    const mode = object(service.body) && service.body.name === serviceName ? service.body.enforcementMode : null;
+    const fields = object(gate.body) && object(gate.body.fields) ? gate.body.fields : {};
+    const ttl = attestMatches && object(attest.body) && typeof attest.body.tokenTtl === "string" &&
+      /^[0-9]{1,8}s$/.test(attest.body.tokenTtl) ? Number(attest.body.tokenTtl.slice(0, -1)) : null;
+    return {
+      projectId,
+      bundledConfiguration: {
+        projectMatches: bundled.projectMatches && bundled.projectId === projectId,
+        apiKeyMatches: bundled.apiKeyMatches,
+        bundleIdentifierMatches: bundled.bundleIdentifierMatches,
+      },
+      iosApp: { httpStatus: app.httpStatus, matchesBundle: appMatches,
+        teamConfigured: appMatches && object(app.body) ? typeof app.body.teamId === "string" && TEAM_ID.test(app.body.teamId) : null },
+      appAttest: { httpStatus: attest.httpStatus, configured: attest.httpStatus === 404 ? false : attestMatches, tokenTtlSeconds: ttl },
+      authentication: {
+        httpStatus: auth.httpStatus,
+        anonymousEnabled: object(signIn.anonymous) ? boolean(signIn.anonymous.enabled) : null,
+        emailPasswordEnabled: object(signIn.email) ? boolean(signIn.email.enabled) : null,
+        anonymousAutoDeletion: boolean(authBody.autodeleteAnonymousUsers),
+      },
+      firestoreAppCheck: { httpStatus: service.httpStatus,
+        enforcementMode: mode === "ENFORCED" || mode === "UNENFORCED" || mode === "OFF" ? mode : "unknown" },
+      automaticEnrollment: { httpStatus: gate.httpStatus,
+        enabled: gate.httpStatus === 404 ? false : object(fields.enabled) ? boolean(fields.enabled.booleanValue) : null },
+      nativeAttestation: "not-checked",
+    };
+  } catch {
+    throw new OwnerManagementError("Configuration diagnosis could not verify owner access and project identity; no settings were changed");
+  }
+}
+
 export async function configureAutomaticServices(
   projectId: string,
   appId: string,
@@ -161,6 +297,7 @@ export async function configureAutomaticServices(
 }
 
 export async function runAutomaticOwnerCommand(options: AutomaticOwnerArguments, backend: AutomaticOwnerBackend): Promise<string> {
+  if (options.action === "diagnose") return `${JSON.stringify(await backend.diagnose(), null, 2)}\n`;
   if (options.action === "configure-automatic") {
     if (!options.appId || !APP_ID.test(options.appId) || !options.teamId || !TEAM_ID.test(options.teamId)) throw new OwnerManagementError("Provide valid iOS app and Apple team identifiers");
     await backend.configureAutomatic(options.appId, options.teamId);
@@ -221,6 +358,17 @@ export async function createAutomaticOwnerBackend(projectId: string) {
   const root = (kind: InstallationKind, uid: string) => store.collection(kind === "automatic" ? "automaticUploads" : "uploadAuthorizations").doc(uid);
   const metadata = (kind: InstallationKind, uid: string) => store.collection("uploadOwnerMetadata").doc(`${kind}:${uid}`);
   const backend: AutomaticOwnerBackend = {
+    diagnose: async () => {
+      const rootPath = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+      let bundled: BundledFirebaseConfiguration;
+      try {
+        bundled = parseBundledFirebaseConfiguration(
+          readFileSync(resolve(rootPath, "GoogleService-Info.plist"), "utf8"),
+          JSON.parse(readFileSync(resolve(rootPath, "app.json"), "utf8")), FIREBASE_CONFIG,
+        );
+      } catch { throw new OwnerManagementError("Bundled Firebase configuration could not be inspected; check the plist and app configuration"); }
+      return readAutomaticDiagnostics(projectId, bundled, credential);
+    },
     firestoreEnforcement: () => readFirestoreEnforcement(projectId, credential),
     configureAutomatic: (appId, teamId) => configureAutomaticServices(projectId, appId, teamId, credential),
     setEnrollmentEnabled: async (enabled) => { await store.doc(AUTOMATIC_ENROLLMENT_CONTROL).set({ enabled }); },

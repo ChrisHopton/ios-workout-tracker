@@ -949,3 +949,74 @@ test("temporary automatic enrollment denial retries the same staged identity and
   assert.equal(app.controller.getSnapshot().status, "synced");
   app.controller.dispose();
 });
+
+test("visible diagnostics and manual retry retain backoff and immutable uploads", async () => {
+  let calls = 0;
+  let fail = true;
+  const app = setup(async (request) => { calls++; if (fail) throw new SyncError("Temporarily unavailable", true, "network"); return success(request); });
+  app.repository.put(change());
+  await app.controller.initialize();
+  await assert.rejects(app.controller.syncNow());
+  const frozen = structuredClone(app.repository.frozen);
+  const failed = app.controller.getSnapshot();
+  assert.equal(failed.errorKind, "network");
+  assert.equal(failed.retryable, true);
+  assert.equal(failed.phase, "upload");
+  assert.equal(failed.nextRetryAt, new Date(app.time.time + 15000).toISOString());
+  app.controller.retry(); app.controller.retry();
+  await app.time.advance(14999);
+  assert.equal(calls, 1);
+  assert.deepEqual(app.repository.frozen, frozen);
+  fail = false;
+  await app.time.advance(1);
+  assert.equal(calls, 2);
+  const done = app.controller.getSnapshot();
+  assert.equal(done.status, "synced");
+  assert.equal(done.errorKind, null);
+  assert.equal(done.nextRetryAt, null);
+  assert.equal(done.phase, "idle");
+  app.controller.dispose();
+});
+test("manual retry cannot bypass revoked credentials", async () => {
+  let calls = 0;
+  const app = setup(async () => { calls++; throw new SyncError("Access revoked", false, "auth"); });
+  app.repository.put(change());
+  await app.controller.initialize();
+  await assert.rejects(app.controller.syncNow());
+  assert.equal(app.controller.getSnapshot().errorKind, "auth");
+  assert.equal(app.controller.getSnapshot().retryable, false);
+  app.controller.retry();
+  await app.time.advance(600000);
+  assert.equal(calls, 1);
+  assert.equal(app.time.jobs.size, 0);
+  app.controller.dispose();
+});
+test("manual retry respects the daily upload allowance reset", async () => {
+  let calls = 0;
+  const app = setup(async (request) => { calls++; return success(request); });
+  app.repository.put(change());
+  app.repository.remaining = 0;
+  app.repository.resetAt = app.time.time + 60000;
+  await app.controller.initialize();
+  await assert.rejects(app.controller.syncNow());
+  assert.equal(app.controller.getSnapshot().errorKind, "quota");
+  app.controller.retry();
+  await app.time.advance(59999);
+  assert.equal(calls, 0);
+  await app.time.advance(1);
+  assert.equal(calls, 1);
+  app.controller.dispose();
+});
+
+test("local edits preserve the separate setup retry deadline", async () => {
+  const app = setup();
+  app.secrets.saved = null;
+  app.repository.local = null;
+  const deadline = app.time.time + 15000;
+  app.controller.reportStartupError(new SyncError("Verification unavailable", true, "attestation"), deadline);
+  app.controller.changed();
+  await settle();
+  assert.equal(app.controller.getSnapshot().nextRetryAt, new Date(deadline).toISOString());
+  assert.equal(app.controller.getSnapshot().errorKind, "attestation");
+  app.controller.dispose();
+});
