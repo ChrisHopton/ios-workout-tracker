@@ -8,11 +8,21 @@ Record device, iOS version, build number, tester, and date here:
 - Build:
 - Tester / date:
 
+## Current rollout — first phone
+
+The October 26 preview update is published. Verify the primary phone first; second-phone attestation and uploads are explicitly deferred. Keep both apps installed.
+
+- [ ] After two online launches, Settings → Uploads shows update ID starting 01a17b68 and runtime fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06.
+- [ ] Confirm valid production App Check metrics with enrollment still closed. Monitoring-only mode must be active first; default OFF collects no metrics.
+- [ ] Confirm enforcement, allow propagation and verify real missing/invalid-token rejection before the guarded enrollment command.
+- [ ] On the primary phone, initial history is Uploaded, pending changes are zero, and a confirmed upload time is present. Verify owner-side records, then edit one set and verify a newer revision. Record counts/revisions/timestamps without copying workout contents or tokens into logs.
+- [ ] Exercise the new overview/detail navigation; period, search and scroll survive Back. Retry never bypasses an active quota/backoff and never replaces a revoked/corrupt identity.
+
 ## Install and presentation
 
 - [ ] Install from EAS on a registered phone, enable Developer Mode, and launch.
 - [ ] Home, Analytics, and Settings are reachable using bottom tabs.
-- [ ] On a standard iPhone and a Pro Max, the top-right create-plan icon is fully visible and tappable, and bottom tabs sit above the home indicator without a duplicate safe-area gap. Check Home, Analytics, Settings, and the plan editor/recording screens.
+- [ ] On a standard iPhone and a Pro Max, the top-right Plans action is fully visible and tappable, and bottom tabs sit above the home indicator without a duplicate safe-area gap. Check Home, Analytics, Settings, and the plan editor/recording screens.
 - [ ] Check light and dark appearance, larger accessibility text, screen-reader labels, safe areas, and tap targets.
 - [ ] Check every form with the keyboard open, including inputs near the bottom and decimal weights.
 - [ ] Stop the PC server, enable airplane mode, and verify the app launches and remains usable.
@@ -78,7 +88,7 @@ Open issues / screenshots / results:
 
 ## Recommendations, recurrence, and body-weight acceptance
 
-- [ ] Home + and Manage plans open the same plan list; create, edit, cancel/discard, archive, and failed-save retry return correctly.
+- [ ] Home Plans opens the plan list; create, edit, cancel/discard, archive, and failed-save retry return correctly.
 - [ ] A lone Every 2 weeks plan keeps its rest week; opposite-week plans share a day; conflicts show inline without modifying other plans.
 - [ ] Existing irregular schedules keep their dates while editing names/exercises; selecting a new frequency changes dates only from today.
 - [ ] Record 40 lb × 12 and 80 lb × 10 for an 8–12 target; the next session suggests 75 lb at a 5 lb increment, with an explanation.
