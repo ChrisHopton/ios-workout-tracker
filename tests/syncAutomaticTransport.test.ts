@@ -408,3 +408,17 @@ test("automatic binding App Check and malformed 403 responses cannot become enro
   await assert.rejects(malformed(BIND, AUTOMATIC), (error: unknown) =>
     error instanceof SyncError && error.kind === "auth" && !error.retryable);
 });
+
+test("only sanitized attestation diagnostics survive upload transport", async () => {
+  const { attestationDiagnostic } = await import("../src/sync/attestationDiagnostic");
+  for (const safe of [true, false]) {
+    const message = safe ? attestationDiagnostic({ code: "appCheck/provider-not-ready" }, "token") : "private-token";
+    let calls = 0;
+    const transport = createSyncTransport(fetcher(async () => { calls++; throw new Error(); }), {
+      requireAppCheck: true, getAppCheckToken: async () => { throw new SyncError(message, true, "attestation"); },
+    });
+    await assert.rejects(transport(BIND, AUTOMATIC), (e: unknown) => e instanceof SyncError &&
+      e.kind === "attestation" && !e.message.includes("private-token") && (!safe || e.message.includes("AT-PROVIDER")));
+    assert.equal(calls, 0);
+  }
+});

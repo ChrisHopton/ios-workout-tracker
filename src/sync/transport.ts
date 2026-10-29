@@ -1,3 +1,4 @@
+import { isAttestationDiagnostic } from "./attestationDiagnostic";
 import {
   byteLength,
   documentRoot,
@@ -303,7 +304,8 @@ export function createSyncTransport(
         });
         appCheckToken = await Promise.race([options.getAppCheckToken(forceRefresh), timeout]);
         if (!opaque(appCheckToken)) throw new Error();
-      } catch {
+      } catch (error) {
+        if (error instanceof SyncError && error.kind === "attestation" && isAttestationDiagnostic(error.message)) throw error;
         throw new SyncError("App verification could not be refreshed. Try again.", true, "attestation");
       } finally {
         cancel(timer);

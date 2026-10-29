@@ -161,3 +161,7 @@ For automatic enrollment denials, check App Check enforcement/attestation, the o
 Install replacement binaries over existing apps to retain local history. Earlier migrations removed Sheets state/credentials and upgraded SQLite history while preserving internal migration copies and frozen uploads. The app does not download records from Sheets or Firestore.
 
 Retire the former **Workout Sheets Sync** Apps Script resources only after installed-phone migration and owner verification succeed: disable both prior device authorizations, archive the active web-app deployment, and verify the old endpoint rejects both old codes. Then move the private **Workout** spreadsheet to recoverable Google Drive Trash. Do not permanently delete it or empty Trash. Until verification succeeds, leave those resources in place and mark retirement pending.
+
+### Phone verification diagnostic codes
+
+If Settings → Uploads shows an AT- code, report that code with the displayed update/runtime IDs. It identifies a fixed failure category, not a token or installation secret. AT-CONFIG/APP/MODULE/PROVIDER concern native configuration; AT-TOKEN/EMPTY concern token acquisition; AT-REJECTED indicates a recognized HTTP 403 marker; AT-LIMIT indicates HTTP 429; AT-NETWORK and AT-TIMEOUT concern connectivity or the 20-second deadline. These categories guide investigation and are not proof of the underlying cause. Never uninstall to troubleshoot; preserve the local journal and identity.

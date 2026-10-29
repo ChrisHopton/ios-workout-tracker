@@ -1,5 +1,15 @@
 # Verification report — October 22, 2026
 
+## Phone attestation investigation — October 28, 2026
+
+The primary phone reports the generic app-verification failure from the October 26 OTA update. Root cause is not established and uploads are not claimed working.
+
+Read-only checks of the October 22 signed archive (build 00474cfc-0dd6-45d3-ada1-f19e7e2b7e3a) confirmed production App Attest in the executable, a profile permitting production, matching application identifiers, RNFBAppCheck framework inclusion, and matching bundled Firebase app/project/key and Apple team. Profile expiry is October 17, 2027. The live public app key allows the App Check API. App Attest, anonymous auth and monitoring-only mode remain configured; the enrollment gate remains closed. Aggregate App Check/service API metrics returned no series for the prior 72 hours; that absence is not a native error diagnosis.
+
+The native adapter now converts failures to fixed diagnostic messages and codes (AT-CONFIG, AT-APP, AT-MODULE, AT-PROVIDER, AT-TOKEN, AT-EMPTY, AT-REJECTED, AT-LIMIT, AT-NETWORK, AT-TIMEOUT). Only exact allowlisted messages can reach Settings; arbitrary native messages, tokens, URLs and request data are discarded. Transport preserves these safe details during enrollment/uploads. No changes to identities, history, schema, native dependencies, retry limits, provider choice or security enforcement.
+
+Validation: 334 application tests passed, zero failed, one emulator-only skip. Six new regressions cover native production-provider configuration, signup gating, timeout/late completion, empty tokens, safe diagnostic presentation and transport preservation. Physical phone result is still required; these mocked native tests do not establish App Attest acceptance.
+
 ## Simpler screens and upload diagnostics — October 26, 2026
 
 Home now has one date header, a selectable week strip, one Plans entry, and one workout action. Analytics has two totals, a weekly workout chart, recent exercises and focused detail routes. Settings keeps save feedback and exposes upload diagnostics only when the Uploads row is expanded.

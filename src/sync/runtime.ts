@@ -1,6 +1,7 @@
 import { getApp } from "@react-native-firebase/app";
 import { initializeAppCheck, getToken, type AppCheck } from "@react-native-firebase/app-check";
 import * as Device from "expo-device";
+import { attestationDiagnostic } from "./attestationDiagnostic";
 import { FIREBASE_CONFIG } from "./firebaseConfig";
 import { createAnonymousCredentials, createSyncTransport, SyncError } from "./transport";
 import { loadRefreshToken, saveRefreshToken } from "./credentials";
@@ -8,19 +9,21 @@ import { loadRefreshToken, saveRefreshToken } from "./credentials";
 let appCheck: AppCheck | undefined;
 async function appCheckToken(forceRefresh = false): Promise<string> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  let stage: "configuration" | "token" = "configuration";
   try {
     appCheck ??= initializeAppCheck(getApp(), {
       provider: { providerOptions: { apple: { provider: "appAttest" } } },
       isTokenAutoRefreshEnabled: true,
     });
+    stage = "token";
     const { token } = await Promise.race([
       getToken(appCheck, forceRefresh),
-      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error()), 20_000); }),
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject({ code: "workout/attestation-timeout" }), 20_000); }),
     ]);
-    if (!token) throw new Error();
+    if (!token) throw { code: "workout/attestation-empty" };
     return token;
-  } catch {
-    throw new SyncError("App verification is temporarily unavailable. Your workouts remain saved on this phone.", true, "attestation");
+  } catch (error) {
+    throw new SyncError(attestationDiagnostic(error, stage), true, "attestation");
   } finally { if (timeout) clearTimeout(timeout); }
 }
 export function createUploadRuntime() {
