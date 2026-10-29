@@ -36,6 +36,10 @@ npm run firebase:setup -- enable-automatic --project workout-bb5a2
 
 The app accepts only new enrollment v3 and record envelope v2. SQLite v6 uses a permanent local reset marker and resumable identity reconciliation; credential v3 preserves a proven anonymous UID and latest secure refresh token while rotating generation/installation IDs. The reset clears old queued/frozen uploads atomically but preserves daily attempted-write accounting. Failure to read secure storage or authenticate must not generate another account or wipe the new profile again. App-managed old recovery copies are cleaned after reset; user-exported files are untouched.
 
+## Published release
+
+Preview update `01a185ff-4bd5-7142-a119-fb2024d71e94` was published from commit `71717d3` after the live reporting reset. Runtime matches `fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06`; enrollment is open with App Check enforced. Open the installed app online for about 30 seconds, close and reopen it to load the update. Complete the profile only after the new onboarding screen appears. Do not uninstall. Both phone acceptances remain pending.
+
 ## Acceptance checklist
 
 - [ ] First phone receives the update and shows required onboarding.

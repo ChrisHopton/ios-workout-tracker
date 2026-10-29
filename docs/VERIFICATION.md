@@ -19,7 +19,11 @@ Regressions cover transaction rollback, independent reset-marker persistence, cl
 
 The owner cleanup utility has 12 tests, including concrete backend races: reserved orphan namespaces and root-checked deletion transactions prevent a stale cleanup from deleting new profiles. Unexpected child collections stop cleanup; disabled/concurrently revoked bindings remain intact. The tool checks the exact deployed rule source, closed enrollment, and ENFORCED App Check before changing reporting data.
 
-Live cutover/publication and acceptance for each phone are recorded below when confirmed. No physical-device acceptance is inferred from automated tests or OTA publication. See [PROFILE_RESET.md](PROFILE_RESET.md) for the ordered rollout and separate phone checklist.
+Live cutover on October 28 local (October 29 UTC): closed enrollment, deployed the tested version fence/index configuration, and verified exact deployed rules plus ENFORCED App Check. Dry run found 66 reporting documents in three old namespaces. The approved guarded purge completed; independent readback found zero namespaces and zero reporting documents. Legacy authorization records were retained disabled; Firebase Auth users and service configuration were not deleted or modified by cleanup.
+
+Published source commit `71717d32f7b1acc661c645a560b223fa7ec83402` to the compatible preview OTA: group `571d01a7-1b2d-42f0-8066-0cd8ce0a9569`, iOS update `01a185ff-4bd5-7142-a119-fb2024d71e94`, runtime `fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06`. EAS completed its production export (2,666,308-byte packaged Hermes bundle), uploaded it and confirmed publication. The guarded owner command reopened enrollment after confirming App Check remains ENFORCED.
+
+Phone 1: new-profile/local-reset/initial-plus-incremental upload acceptance pending. Phone 2: all acceptance pending separately. Publication does not prove either phone has applied the update. Native keyboard, VoiceOver, larger text and physical-device layout checks remain pending. See [PROFILE_RESET.md](PROFILE_RESET.md) for the ordered rollout and separate phone checklist. Old Sheets retirement remains deferred.
 
 ## App Check consumer API repair - October 28, 2026
 
