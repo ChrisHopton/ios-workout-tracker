@@ -1,6 +1,18 @@
-# Verification report — October 22, 2026
+# Verification report â€” October 22, 2026
 
-## Phone attestation investigation — October 28, 2026
+## App Check consumer API repair — October 28, 2026
+
+The primary phone reported AT-REJECTED on diagnostic update 01a185cf. The public App Attest challenge returned HTTP 403 / PERMISSION_DENIED with SERVICE_DISABLED. Owner Service Usage inspection independently confirmed firebaseappcheck.googleapis.com was DISABLED despite an existing App Attest configuration. Enabled that exact consumer API at 2026-10-29T04:02:51.721Z (October 28 local); readback was ENABLED and the same challenge returned HTTP 200 with a challenge. No challenge, token, or credentials were logged.
+
+After Retry, the owner reported the phone advanced to registration waiting for owner authorization. The native adapter requires an App Check token before this enrollment request; this is progress past token acquisition. Server verification/enforcement and upload acceptance are tracked separately below, not inferred from challenge success.
+
+Live acceptance on the first phone: aggregate Firestore App Check metrics recorded VALID / ALLOW for the exact bundled iOS app after Retry. Enabled ENFORCED at 2026-10-29T04:09:16.299Z. Temporary anonymous probes with missing and invalid App Check tokens both returned HTTP 403; subsequent service metrics independently confirmed MISSING_UNKNOWN_ORIGIN / DENY and INVALID / DENY. Probes used empty commits (no writes) and the temporary Auth account was deleted. The guarded owner command then opened automatic enrollment.
+
+At 2026-10-29T04:12:17.307Z, owner metadata inspection confirmed one enabled automatic installation, 47 documents, and initialUploadComplete true: 37 exercise definitions, 2 body-weight entries, 1 profile, 1 plan, 1 schedule header, 1 schedule snapshot, 1 workout, 2 workout-exercise snapshots, and 1 completion marker. No personal field values, tokens, or credentials were printed. A subsequent real edit and phone Up to date confirmation are pending; second-phone acceptance and old Sheets retirement remain deferred. Billing, client read denial, local journals and saved identities remain unchanged.
+
+Owner setup now verifies/enables the consumer API before provider configuration, stops on incomplete enablement, and can safely be rerun. GET-only diagnostics report ENABLED, DISABLED or unknown independently of provider configuration. Regression coverage includes disabled, pending, inaccessible and wrong-project states. Application suite: 337 passed, zero failed, one emulator-only skip. Firestore emulator: 20 passed. TypeScript, Expo lint and explicit owner-tool lint passed. No app/runtime code, schema, dependencies or rules changed; no new OTA is required for this repair.
+
+## Phone attestation investigation â€” October 28, 2026
 
 The primary phone reports the generic app-verification failure from the October 26 OTA update. Root cause is not established and uploads are not claimed working.
 
@@ -12,7 +24,7 @@ Validation: 334 application tests passed, zero failed, one emulator-only skip. S
 
 TypeScript and Expo lint passed. EAS completed the production iOS export and published the diagnostic OTA from commit `0b5be1313df80929e92a6eb3bf23fc0a02444bc6` to preview with matching runtime `fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06`. Update group: `2642e1a5-4b6b-4a5c-a6b2-dd2c43aa8898`; iOS update: `01a185cf-bc74-7605-8680-57e18cba43fc`. The primary phone's new AT- code is pending. No server permissions or enforcement changed in this investigation.
 
-## Simpler screens and upload diagnostics — October 26, 2026
+## Simpler screens and upload diagnostics â€” October 26, 2026
 
 Home now has one date header, a selectable week strip, one Plans entry, and one workout action. Analytics has two totals, a weekly workout chart, recent exercises and focused detail routes. Settings keeps save feedback and exposes upload diagnostics only when the Uploads row is expanded.
 
@@ -29,7 +41,7 @@ Home now has one date header, a selectable week strip, one Plans entry, and one 
 
 New regressions cover typed status/retry presentation, setup interruption, single-flight retries, terminal identities, quota deadlines, immutable upload retries, preserved startup retry timing after local edits, Home action selection and recent exercise routing. The owner diagnostic performs GET-only configuration checks and prints sanitized flags; unknown enforcement is never represented as verified.
 
-Temporary browser instrumentation confirmed one summary at baseline, no additional summaries while editing and finishing a recorded workout with Analytics hidden, and exactly one fresh summary when returning. The latest row then showed the edited 140 lb × 8 result. Instrumentation was removed before release. Synthetic browser data stays on the mock transport.
+Temporary browser instrumentation confirmed one summary at baseline, no additional summaries while editing and finishing a recorded workout with Analytics hidden, and exactly one fresh summary when returning. The latest row then showed the edited 140 lb Ã— 8 result. Instrumentation was removed before release. Synthetic browser data stays on the mock transport.
 
 Checked narrow 320-pixel and 375-pixel layouts and 430-pixel Pro Max sizing in the browser. The narrow week strip scrolls instead of shrinking 44-point date controls. Browser checks do not establish physical iOS safe-area, VoiceOver, Dynamic Type, light-mode or native keyboard acceptance.
 
@@ -48,7 +60,7 @@ Published October 26, 2026 from commit `fe794eb434791742e48f629aff4a3ea7933cdd2e
 
 EAS confirmed publication and matching fingerprint. This does not confirm a phone downloaded/applied the update. The owner reported opening Workout online at about 03:20 UTC October 27. Sanitized Firestore verification metrics through 03:32 UTC contained no series; metrics can lag, so no native failure/success is inferred. Enrollment remains closed, service monitoring is UNENFORCED, and physical first-phone attestation, enforcement rejection tests, initial upload and incremental upload remain pending. No user journal or credentials were reset, and no app was uninstalled.
 
-## Simpler Settings and personalized Analytics — October 22, 2026
+## Simpler Settings and personalized Analytics â€” October 22, 2026
 
 This source-only release adds local save feedback, compact body-weight entry, and public aggregate comparisons. The gender selector and comparison choices offer Female and Male only. Older custom profile values are preserved until edited. No deployment, OTA publication, native rebuild or owner-cloud configuration change was performed.
 
@@ -59,7 +71,7 @@ This source-only release adds local save feedback, compact body-weight entry, an
 | Benchmark generator | 11 tests passed; complete regeneration reproduced both tables byte for byte |
 | TypeScript / Expo lint | Passed |
 | Production iOS export | Passed; 1,386 modules, 3,236,684-byte Hermes bundle |
-| Expo compatibility / Doctor | 20/21; patch mismatches: Expo 57.0.29→57.0.31, Router 57.0.27→57.0.29, Sharing 57.0.23→57.0.24 |
+| Expo compatibility / Doctor | 20/21; patch mismatches: Expo 57.0.29â†’57.0.31, Router 57.0.27â†’57.0.29, Sharing 57.0.23â†’57.0.24 |
 | Browser | Saved-state/edit reset, same-day update, persisted profile/measurement after refresh, Male/Female-only selector, population comparison, optional competitor line, profile-independent override and focus gating verified |
 | Physical iPhone | Still deferred; no native keyboard, VoiceOver, Dynamic Type or app-resume acceptance claimed |
 
@@ -67,13 +79,13 @@ Regression coverage includes delayed and failed local flushes, repeated taps, pr
 
 Benchmark tests cover inclusive age/exclusive size boundaries, sample/effective-count thresholds, explicit wider bands, unavailable demographics, canonical barbell variants, dated/stale measurements, unit conversion, offline lookup and optional chart scaling. Source preprocessing tests cover weighted means, effective counts, exclusions, deduplication, successful meet selection, sparse suppression, pin validation and source row integrity. No demographic benchmark is used by the workout recommendation algorithm.
 
-The browser used synthetic local-only data. At a 430×932 viewport, the compact card and reference line were readable; at 320×740, the weight Save control wrapped below its input. Both palettes were visually inspected using a temporary theme override which was removed afterward. Saving 185 lb then 186 lb on the same date kept one History entry. A 35-year-old male profile at 5 ft 10 in displayed a 198 lb U.S. reference; the supported bench chart displayed its 287 lb competitor reference separately from the 171 lb user estimate. Changing the Analytics reference category did not alter the profile. The browser mock never uploads these fixtures.
+The browser used synthetic local-only data. At a 430Ã—932 viewport, the compact card and reference line were readable; at 320Ã—740, the weight Save control wrapped below its input. Both palettes were visually inspected using a temporary theme override which was removed afterward. Saving 185 lb then 186 lb on the same date kept one History entry. A 35-year-old male profile at 5 ft 10 in displayed a 198 lb U.S. reference; the supported bench chart displayed its 287 lb competitor reference separately from the 171 lb user estimate. Changing the Analytics reference category did not alter the profile. The browser mock never uploads these fixtures.
 
 Temporary summary instrumentation confirmed no hidden recomputation during recording and one fresh computation on returning to Analytics; details and bundle measurements are in [PERFORMANCE.md](PERFORMANCE.md). All instrumentation and theme overrides were removed. The smaller viewport/browser checks do not substitute for native safe-area or larger Dynamic Type testing.
 
 The three Expo patch warnings remain in the existing [dependency-maintenance follow-up](DEFERRED_WORK.md); no forced or unrelated upgrades were applied. [Benchmark sources](BENCHMARK_SOURCES.md) document pinned public inputs, their limitations and offline regeneration. App Check enforcement, installed-phone upload acceptance and retirement of the former Sheet remain separate deferred rollout steps.
 
-## Automatic private uploads and Settings — October 19, 2026
+## Automatic private uploads and Settings â€” October 19, 2026
 
 This release replaces database setup forms with automatic anonymous Firebase enrollment and a read-only disclosure/status panel. Gender uses a themed accessible selection sheet; legacy custom values stay intact until changed. Native Firebase App Check uses production App Attest only, with explicit headers on Firestore REST commits. Public app configuration is bundled; private device credentials and refresh tokens remain in device-only Keychain storage.
 
@@ -83,7 +95,7 @@ This release replaces database setup forms with automatic anonymous Firebase enr
 | Firestore emulator | 20 passed separately, including own/cross-account read denial, enrollment gate, immutable binding, revocation and atomic failures |
 | TypeScript / Expo lint | Passed |
 | Production iOS export | Passed; 1,377 modules, 3,614,242 bytes total; 3,199,705-byte Hermes bundle |
-| Expo compatibility / Doctor | 20/21; existing Expo 57.0.29→57.0.30 and Router 57.0.27→57.0.28 patch warnings remain |
+| Expo compatibility / Doctor | 20/21; existing Expo 57.0.29â†’57.0.30 and Router 57.0.27â†’57.0.28 patch warnings remain |
 | Browser | Selector save/reload and cancel verified; final mock enrollment reaches Up to date; no code/connection controls |
 | Native binary, attestation and installed phones | Blocked on owner Apple sign-in; not verified |
 
@@ -131,7 +143,7 @@ This pass changes local validation, recording behavior, migration handling, and 
 
 The compatibility checks report installed `expo@57.0.29` versus expected `57.0.30`, and installed `expo-router@57.0.27` versus expected `57.0.28`. Those version updates are explicitly deferred to [dependency maintenance](DEFERRED_WORK.md#dependency-security-maintenance). Warnings remain visible; the check is not reported as fully passing.
 
-The browser focus check used temporary summary-call instrumentation, removed afterward. Opening Analytics and choosing the four-week range produced two summary calls. While Analytics was hidden, recording 85 lb and 11 reps, completing the set, and finishing the workout left the count at two. Returning to Analytics produced one fresh summary: volume changed from 1,280 to 1,415, the personal-record result from 80 lb × 10 to 85 lb × 11, and the suggestion from 75 lb to 80 lb. The four-week and Arms filters, the 181.5 measurement draft, and the 1,484.5 px scroll position were retained. This establishes browser behavior, not native navigation, app-resume, or midnight behavior; those phone checks remain pending.
+The browser focus check used temporary summary-call instrumentation, removed afterward. Opening Analytics and choosing the four-week range produced two summary calls. While Analytics was hidden, recording 85 lb and 11 reps, completing the set, and finishing the workout left the count at two. Returning to Analytics produced one fresh summary: volume changed from 1,280 to 1,415, the personal-record result from 80 lb Ã— 10 to 85 lb Ã— 11, and the suggestion from 75 lb to 80 lb. The four-week and Arms filters, the 181.5 measurement draft, and the 1,484.5 px scroll position were retained. This establishes browser behavior, not native navigation, app-resume, or midnight behavior; those phone checks remain pending.
 
 Upload-state regression coverage includes an injected database read failure followed by retrying the same snapshot, unchanged current/staged identities and frozen batches after enrollment read failures, retryable disconnect/rename/batch/acknowledgment operations, and continued local recording with malformed identities followed by replacement-generation enrollment. Strict state reads still report malformed identities.
 
@@ -139,7 +151,7 @@ Additional regressions cover failed connection replacement preserving prior cred
 
 The cleanup reuses validated frozen schedule revisions and unchanged serialized metadata during recording. Full import validation, uniqueness checks, immutable snapshots, transaction rollback, and exact in-flight retries remain. Internal migration copies no longer use the portable 10 MiB guard. **Portable v2 exports and v1/v2 Settings imports still have a 10 MiB limit, and an internal recovery copy above 10 MiB cannot currently be restored through Settings.** Larger portable recovery is a [separate follow-up](DEFERRED_WORK.md#large-history-portable-backups).
 
-## Historical Firestore implementation verification — October 14, 2026
+## Historical Firestore implementation verification â€” October 14, 2026
 
 At this checkpoint the upload backend had changed from Google Sheets to Cloud Firestore. The complete local test run passed 193 tests with no failures; its one skipped test was the emulator suite, which passed separately with all 12 tests and no skips. Strict typecheck and Expo ESLint passed. Expo dependency compatibility checks reported all dependencies current, Expo Doctor passed 21 of 21 checks, and the production iOS JavaScript/Hermes export succeeded.
 
@@ -147,11 +159,11 @@ Tests cover document projection and full snapshot preservation, blank versus zer
 
 The SQLite schema is version 5. Native migrations preserve a validated JSON journal in its original schema and a version-specific file before migration; Settings exposes **Export pre-migration backup** when it is available. Journal data and upload changes share a transaction. A cloud connection or upload failure must leave local recording and JSON recovery available.
 
-Browser uploads use a local transport demo and do not contact Firebase. The October 14 browser check created a fortnightly plan through the shared manager, verified its dated rest week, reopened the shared editor, and discarded an unsaved title without changing the saved plan. Settings saved an optional 180 lb measurement. Recording 40 lb × 12 and 80 lb × 10 then finishing the workout produced 75 lb per working set in the next-workout analytics card, along with completed-set totals, volume, personal records, and a dated relative-strength result. These checks do not verify native secure storage, iPhone networking, or physical-device behavior.
+Browser uploads use a local transport demo and do not contact Firebase. The October 14 browser check created a fortnightly plan through the shared manager, verified its dated rest week, reopened the shared editor, and discarded an unsaved title without changing the saved plan. Settings saved an optional 180 lb measurement. Recording 40 lb Ã— 12 and 80 lb Ã— 10 then finishing the workout produced 75 lb per working set in the next-workout analytics card, along with completed-set totals, volume, personal records, and a dated relative-strength result. These checks do not verify native secure storage, iPhone networking, or physical-device behavior.
 
 The October 14 regression coverage added all approved mixed-weight examples, two-workout progression/reductions, warm-up exclusions, body-weight histories/ratios, explicit recurrence/conflicts, lossless legacy schedule conversion, strict v1 import/v2 export, raw pre-migration recovery, transaction rollback and preserved frozen uploads. The emulator includes an explicit body_weight upload/denied-own-read/cross-phone-write scenario.
 
-## Historical Firebase project and live setup — October 14, 2026
+## Historical Firebase project and live setup â€” October 14, 2026
 
 At that checkpoint the owner project was on the Spark plan without billing, with a default Firestore database in `us-central1`. Email/password Authentication, production rules, and indexing exemptions were deployed. The body_weight allowlist passed emulator tests and was deployed with the same read denials. Two private phone connection codes were provisioned outside the repository and remain unbound to an installation. Final owner checks confirmed two enabled phone accounts, one human project administrator and disabled billing. No actual phone passwords/codes or owner ADC secrets were found in 115 source/export files. Real project/account identifiers, private codes, passwords, owner tokens, and private file paths are excluded from this report.
 

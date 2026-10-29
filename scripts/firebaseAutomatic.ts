@@ -101,9 +101,9 @@ export function parseAutomaticOwnerArguments(args: string[]): AutomaticOwnerArgu
 async function ownerApi(credential: Pick<Credential, "getAccessToken">, fetcher: typeof fetch) {
   const token = await credential.getAccessToken();
   if (typeof token.access_token !== "string" || !/^[!-~]{1,16384}$/.test(token.access_token)) throw new Error();
-  return async (url: string, body?: unknown): Promise<unknown> => {
+  return async (url: string, body?: unknown, method: "PATCH" | "POST" = "PATCH"): Promise<unknown> => {
     const response = await fetcher(url, {
-      method: body === undefined ? "GET" : "PATCH", redirect: "error", signal: AbortSignal.timeout(20_000),
+      method: body === undefined ? "GET" : method, redirect: "error", signal: AbortSignal.timeout(20_000),
       headers: { Authorization: `Bearer ${token.access_token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
@@ -151,6 +151,7 @@ export interface AutomaticDiagnostics {
     bundleIdentifierMatches: boolean;
   };
   iosApp: { httpStatus: number | null; matchesBundle: boolean | null; teamConfigured: boolean | null };
+  appCheckApi: { httpStatus: number | null; state: "ENABLED" | "DISABLED" | "unknown" };
   appAttest: { httpStatus: number | null; configured: boolean | null; tokenTtlSeconds: number | null };
   authentication: {
     httpStatus: number | null;
@@ -221,13 +222,16 @@ export async function readAutomaticDiagnostics(
     const number = project.body.projectNumber;
     const appName = `projects/${number}/apps/${bundled.appId}/appAttestConfig`;
     const serviceName = `projects/${number}/services/firestore.googleapis.com`;
-    const [app, attest, auth, service, gate] = await Promise.all([
+    const apiName = `projects/${number}/services/firebaseappcheck.googleapis.com`;
+    const [app, attest, auth, service, gate, api] = await Promise.all([
       get(`https://firebase.googleapis.com/v1beta1/projects/${projectId}/iosApps/${encodeURIComponent(bundled.appId)}`),
       get(`https://firebaseappcheck.googleapis.com/v1/projects/${number}/apps/${encodeURIComponent(bundled.appId)}/appAttestConfig`),
       get(`https://identitytoolkit.googleapis.com/admin/v2/projects/${projectId}/config`),
       get(`https://firebaseappcheck.googleapis.com/v1/${serviceName}`),
       get(`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${AUTOMATIC_ENROLLMENT_CONTROL}`),
+      get(`https://serviceusage.googleapis.com/v1/${apiName}`),
     ]);
+    const apiState = object(api.body) && api.body.name === apiName ? api.body.state : null;
     const appMatches = object(app.body) ? app.body.projectId === projectId && app.body.appId === bundled.appId &&
       app.body.bundleId === bundled.bundleId : null;
     const attestMatches = object(attest.body) ? attest.body.name === appName : null;
@@ -247,6 +251,7 @@ export async function readAutomaticDiagnostics(
       },
       iosApp: { httpStatus: app.httpStatus, matchesBundle: appMatches,
         teamConfigured: appMatches && object(app.body) ? typeof app.body.teamId === "string" && TEAM_ID.test(app.body.teamId) : null },
+      appCheckApi: { httpStatus: api.httpStatus, state: apiState === "ENABLED" || apiState === "DISABLED" ? apiState : "unknown" },
       appAttest: { httpStatus: attest.httpStatus, configured: attest.httpStatus === 404 ? false : attestMatches, tokenTtlSeconds: ttl },
       authentication: {
         httpStatus: auth.httpStatus,
@@ -281,6 +286,16 @@ export async function configureAutomaticServices(
     const appUrl = `https://firebase.googleapis.com/v1beta1/projects/${projectId}/iosApps/${encodeURIComponent(appId)}`;
     const app = await request(appUrl);
     if (!object(app) || app.appId !== appId || app.projectId !== projectId) throw new Error();
+    const apiName = `projects/${number}/services/firebaseappcheck.googleapis.com`;
+    const apiUrl = `https://serviceusage.googleapis.com/v1/${apiName}`;
+    let api = await request(apiUrl);
+    if (!object(api) || api.name !== apiName || !["ENABLED", "DISABLED"].includes(String(api.state))) throw new Error();
+    if (api.state === "DISABLED") {
+      await request(apiUrl + ":enable", {}, "POST");
+      api = await request(apiUrl);
+      // Enablement is asynchronous. A pending result is safe to retry on the next owner run.
+      if (!object(api) || api.name !== apiName || api.state !== "ENABLED") throw new Error();
+    }
     const updatedApp = await request(appUrl + "?updateMask=teamId", { teamId });
     if (!object(updatedApp) || updatedApp.appId !== appId || updatedApp.projectId !== projectId || updatedApp.teamId !== teamId) throw new Error();
     const name = `projects/${number}/apps/${appId}/appAttestConfig`;
@@ -292,7 +307,7 @@ export async function configureAutomaticServices(
     if (!object(auth) || !object(auth.signIn) || !object(auth.signIn.anonymous) || auth.signIn.anonymous.enabled !== true ||
       (auth.autodeleteAnonymousUsers !== undefined && auth.autodeleteAnonymousUsers !== false)) throw new Error();
   } catch {
-    throw new OwnerManagementError("Automatic service configuration did not complete; inspect the owner console and retry. Enforcement and enrollment were not enabled");
+    throw new OwnerManagementError("Automatic service configuration did not complete; inspect the owner console, wait for pending API enablement, and retry. Enforcement and enrollment were not enabled");
   }
 }
 
@@ -301,7 +316,7 @@ export async function runAutomaticOwnerCommand(options: AutomaticOwnerArguments,
   if (options.action === "configure-automatic") {
     if (!options.appId || !APP_ID.test(options.appId) || !options.teamId || !TEAM_ID.test(options.teamId)) throw new OwnerManagementError("Provide valid iOS app and Apple team identifiers");
     await backend.configureAutomatic(options.appId, options.teamId);
-    return "App Attest configured and anonymous sign-in enabled; password sign-in preserved. Enforcement and enrollment were not changed\n";
+    return "App Check API enabled, App Attest configured and anonymous sign-in enabled; password sign-in preserved. Enforcement and enrollment were not changed\n";
   }
   if (options.action === "list") {
     return `${JSON.stringify({ installations: await backend.listInstallations() }, null, 2)}\n`;

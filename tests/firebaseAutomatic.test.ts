@@ -10,6 +10,7 @@ const APP_ID = "1:123456789:ios:fixture";
 const TEAM_ID = "ABCDEFGHIJ";
 const UID = "automatic-fixture";
 const PROJECT_NUMBER = "123456789";
+const API_NAME = `projects/${PROJECT_NUMBER}/services/firebaseappcheck.googleapis.com`;
 const SERVICE_NAME = `projects/${PROJECT_NUMBER}/services/firestore.googleapis.com`;
 const installation: OwnerInstallation = {
   kind: "automatic", uid: UID, enabled: true,
@@ -177,6 +178,7 @@ function configurationResponses() {
   return [
     { value: { projectId: PROJECT, projectNumber: PROJECT_NUMBER } },
     { value: { projectId: PROJECT, appId: APP_ID } },
+    { value: { name: API_NAME, state: "ENABLED" } },
     { value: { projectId: PROJECT, appId: APP_ID, teamId: TEAM_ID } },
     { value: { name: `projects/${PROJECT_NUMBER}/apps/${APP_ID}/appAttestConfig`, tokenTtl: "3600s" } },
     { value: { signIn: { anonymous: { enabled: true }, email: { enabled: true } }, autodeleteAnonymousUsers: false } },
@@ -187,15 +189,14 @@ test("configure uses narrow official patches preserving password sign-in and nev
   const request = responses(configurationResponses());
   await configureAutomaticServices(PROJECT, APP_ID, TEAM_ID, credential, request.fetcher);
   const calls = request.requests;
-  assert.deepEqual(calls.map((call) => call.init?.method), ["GET", "GET", "PATCH", "PATCH", "PATCH"]);
-  assert.equal(calls[2].url, `https://firebase.googleapis.com/v1beta1/projects/${PROJECT}/iosApps/${encodeURIComponent(APP_ID)}?updateMask=teamId`);
-  assert.deepEqual(JSON.parse(calls[2].init?.body as string), { teamId: TEAM_ID });
-  assert.equal(calls[3].url, `https://firebaseappcheck.googleapis.com/v1/projects/${PROJECT_NUMBER}/apps/${encodeURIComponent(APP_ID)}/appAttestConfig?updateMask=tokenTtl`);
-  assert.deepEqual(JSON.parse(calls[3].init?.body as string), { name: `projects/${PROJECT_NUMBER}/apps/${APP_ID}/appAttestConfig`, tokenTtl: "3600s" });
-  assert.equal(calls[4].url, `https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/config?updateMask=signIn.anonymous.enabled,autodeleteAnonymousUsers`);
-  assert.deepEqual(JSON.parse(calls[4].init?.body as string), { signIn: { anonymous: { enabled: true } }, autodeleteAnonymousUsers: false });
+  assert.deepEqual(calls.map((call) => call.init?.method), ["GET", "GET", "GET", "PATCH", "PATCH", "PATCH"]);
+  assert.equal(calls[3].url, `https://firebase.googleapis.com/v1beta1/projects/${PROJECT}/iosApps/${encodeURIComponent(APP_ID)}?updateMask=teamId`);
+  assert.deepEqual(JSON.parse(calls[3].init?.body as string), { teamId: TEAM_ID });
+  assert.equal(calls[4].url, `https://firebaseappcheck.googleapis.com/v1/projects/${PROJECT_NUMBER}/apps/${encodeURIComponent(APP_ID)}/appAttestConfig?updateMask=tokenTtl`);
+  assert.deepEqual(JSON.parse(calls[4].init?.body as string), { name: `projects/${PROJECT_NUMBER}/apps/${APP_ID}/appAttestConfig`, tokenTtl: "3600s" });
+  assert.equal(calls[5].url, `https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/config?updateMask=signIn.anonymous.enabled,autodeleteAnonymousUsers`);
+  assert.deepEqual(JSON.parse(calls[5].init?.body as string), { signIn: { anonymous: { enabled: true } }, autodeleteAnonymousUsers: false });
   for (const call of calls) {
-    assert.equal(call.url.includes("/services/"), false);
     assert.equal(call.url.includes("firestore.googleapis.com"), false);
     assert.equal(call.url.includes("uploadControl"), false);
   }
@@ -208,7 +209,7 @@ test("configure stops on wrong app identity or partial API failure without leaki
   ]);
   await assert.rejects(configureAutomaticServices(PROJECT, APP_ID, TEAM_ID, credential, wrongApp.fetcher), /did not complete/);
   assert.deepEqual(wrongApp.requests.map((call) => call.init?.method), ["GET", "GET"]);
-  for (let failed = 0; failed < 5; failed++) {
+  for (let failed = 0; failed < configurationResponses().length; failed++) {
     const values: { value?: unknown; status?: number; throws?: boolean }[] = configurationResponses();
     values[failed] = { throws: true };
     const request = responses(values);
@@ -234,6 +235,7 @@ function diagnosticResponses() {
     { value: { signIn: { anonymous: { enabled: true }, email: { enabled: true } }, autodeleteAnonymousUsers: false } },
     { value: { name: SERVICE_NAME, enforcementMode: "ENFORCED" } },
     { value: { fields: { enabled: { booleanValue: false } } } },
+    { value: { name: API_NAME, state: "ENABLED" } },
   ];
 }
 function publicBundle(projectId = PROJECT, apiKey = "fixture-key-" + "a".repeat(30), bundleId = BUNDLE_ID) {
@@ -265,6 +267,7 @@ test("diagnose only reads the exact configuration endpoints and never dispatches
     projectId: PROJECT,
     bundledConfiguration: { projectMatches: true, apiKeyMatches: true, bundleIdentifierMatches: true },
     iosApp: { httpStatus: 200, matchesBundle: true, teamConfigured: true },
+    appCheckApi: { httpStatus: 200, state: "ENABLED" },
     appAttest: { httpStatus: 200, configured: true, tokenTtlSeconds: 3600 },
     authentication: { httpStatus: 200, anonymousEnabled: true, emailPasswordEnabled: true, anonymousAutoDeletion: false },
     firestoreAppCheck: { httpStatus: 200, enforcementMode: "ENFORCED" },
@@ -278,6 +281,7 @@ test("diagnose only reads the exact configuration endpoints and never dispatches
     `https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/config`,
     `https://firebaseappcheck.googleapis.com/v1/${SERVICE_NAME}`,
     `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents/uploadControl/automaticEnrollment`,
+    `https://serviceusage.googleapis.com/v1/${API_NAME}`,
   ]);
   for (const call of request.requests) {
     assert.equal(call.init?.method, "GET");
@@ -337,4 +341,52 @@ test("diagnose fails closed before other requests on owner access or project ide
     getAccessToken: async () => { throw new Error("private-refresh-secret"); },
   }, request.fetcher), (error: unknown) => error instanceof Error && !error.message.includes("private-refresh-secret"));
   assert.equal(request.requests.length, 0);
+});
+
+test("configure enables the consumer API before App Attest setup and verifies enablement", async () => {
+  const values: { value?: unknown; status?: number }[] = configurationResponses();
+  values.splice(2, 1, { value: { name: API_NAME, state: "DISABLED" } },
+    { value: { name: "operations/enable", done: false } }, { value: { name: API_NAME, state: "ENABLED" } });
+  const request = responses(values);
+  await configureAutomaticServices(PROJECT, APP_ID, TEAM_ID, credential, request.fetcher);
+  assert.equal(request.requests[3].url, `https://serviceusage.googleapis.com/v1/${API_NAME}:enable`);
+  assert.equal(request.requests[3].init?.method, "POST");
+  assert.equal(request.requests[3].init?.body, "{}");
+  assert.equal(request.requests[4].init?.method, "GET");
+  assert.equal(request.requests[5].init?.method, "PATCH");
+});
+
+test("configure stops before provider changes on pending, failed, or mismatched API enablement", async () => {
+  for (const result of [{ value: { name: API_NAME, state: "DISABLED" } },
+    { value: { name: "projects/other/services/firebaseappcheck.googleapis.com", state: "ENABLED" } },
+    { status: 403 }, { throws: true }]) {
+    const values: { value?: unknown; status?: number; throws?: boolean }[] = configurationResponses().slice(0, 2);
+    values.push({ value: { name: API_NAME, state: "DISABLED" } }, { value: { done: false } }, result);
+    const request = responses(values);
+    await assert.rejects(configureAutomaticServices(PROJECT, APP_ID, TEAM_ID, credential, request.fetcher), /did not complete/);
+    assert.equal(request.requests.some(call => call.init?.method === "PATCH"), false);
+  }
+  for (const api of [{ name: API_NAME }, { name: "wrong", state: "DISABLED" }]) {
+    const values = configurationResponses();
+    values[2] = { value: api } as typeof values[number];
+    const request = responses(values);
+    await assert.rejects(configureAutomaticServices(PROJECT, APP_ID, TEAM_ID, credential, request.fetcher), /did not complete/);
+    assert.equal(request.requests.length, 3);
+  }
+});
+
+test("diagnose reports disabled consumer API despite configured App Attest and preserves unknowns", async () => {
+  for (const [response, expected] of [
+    [{ value: { name: API_NAME, state: "DISABLED" } }, "DISABLED"],
+    [{ value: { name: API_NAME, state: "ENABLED" } }, "ENABLED"],
+    [{ value: { name: "wrong", state: "ENABLED" } }, "unknown"],
+    [{ value: { name: API_NAME } }, "unknown"], [{ status: 403 }, "unknown"], [{ throws: true }, "unknown"],
+  ] as const) {
+    const values: { value?: unknown; status?: number; throws?: boolean }[] = diagnosticResponses();
+    values[6] = response;
+    const result = await readAutomaticDiagnostics(PROJECT, bundled, credential, responses(values).fetcher);
+    assert.equal(result.appCheckApi.state, expected);
+    assert.equal(result.appAttest.configured, true);
+    assert.equal(result.nativeAttestation, "not-checked");
+  }
 });
