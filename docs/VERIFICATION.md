@@ -15,6 +15,8 @@ Replaced recent exercises and detail navigation with the latest completed workou
 
 Automated regressions cover imported timestamps, retrospective/future/unfinished sessions, all-history latest-workout selection outside the period, skipped/warm-up/bodyweight sets, volume conversion, muscle-group totals, existing increment preservation and exact legacy suggestion wording. Removed screen names and benchmark consumers have no remaining runtime references.
 
+Published source commit `8c06befe4832e02693af8bb33ae057bec5defe4d` to preview: update group `92bd0fae-1c8c-4eb1-85ee-338633ee187c`, iOS update `01a187b1-411b-73ca-9c91-9f5cf1918b17`. EAS confirmed runtime `fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06` and successful publication. Open Workout online to download, then fully close/reopen it to load the update; do not uninstall. Settings → Uploads exposes the update identifier.
+
 Physical iPhone acceptance remains pending separately for both phones: native snapping/VoiceOver, Dynamic Type, light/dark display, preserved local history and subsequent uploads. Browser sync was mocked and used synthetic data; no real profile or workout contents entered diagnostics. No reinstall or data reset is expected. See [device checklist](DEVICE_CHECKLIST.md).
 
 ## Additive workout-file import — October 29, 2026
