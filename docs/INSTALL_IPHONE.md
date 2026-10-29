@@ -72,7 +72,7 @@ On Home, pick a date in the seven-day strip and use the single workout card to s
 
 Analytics opens at eight weeks with two totals, a weekly workout chart and recent exercise rows. Use **See all** to find an exercise, then review its metric chart and personal best. Workout history and relative strength expand on demand. Muscle groups and volume are under **Training details**; body-weight references are under **Comparisons**. The next-workout card is no longer part of Analytics. Record working and optional warm-up sets in the workout screen; enter optional body-weight measurements in Settings. No effort rating is required.
 
-Install over the existing app rather than uninstalling so the version 5 migration can preserve its journal, credentials, and in-flight uploads. The current interface has no JSON backup/import/export or cloud restore workflow. Earlier release notes about those controls describe the prior interface; underlying versioned validation and internal migration safeguards remain.
+Install updates over the existing app to preserve its current version 6 journal, credentials, and in-flight uploads. Settings includes a collapsed **Import plans and workouts** control for prepared training-only JSON files. This adds records to the existing profile; it is not a full-journal restore. There are no full backup/export or cloud restore controls. See [import steps and safeguards](WORKOUT_IMPORT.md).
 
 ## Updates, signing expiry, and a second person
 

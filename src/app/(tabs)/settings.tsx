@@ -14,6 +14,7 @@ import {
   useTheme,
 } from "../../components/ui";
 import { SyncSettings } from "../../components/SyncSettings";
+import { WorkoutImportSettings } from "../../components/WorkoutImportSettings";
 import { BodyWeightSettings } from "../../components/BodyWeightSettings";
 import { SaveIndicator } from "../../components/SaveIndicator";
 import { PhoneFields, PersonalProfileFields } from "../../components/ProfileFields";
@@ -314,6 +315,7 @@ export default function Settings() {
           )}
         </>}
       </Card>
+      <WorkoutImportSettings disabled={busy} />
       <SyncSettings />
     </Screen>
   );

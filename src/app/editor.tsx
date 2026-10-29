@@ -29,6 +29,7 @@ import {
 import { loadLabel } from "../domain/library";
 import {
   archiveTemplate,
+  planEditEffectiveDate,
   saveTemplate,
   scheduleForDate,
 } from "../domain/schedule";
@@ -102,7 +103,10 @@ export default function WorkoutEditor() {
   const busyRef = useRef(false);
   const [dirty, setDirty] = useState(false);
   const date = today();
-  const previewStart = mondayOf(date);
+  const effectiveDate = planEditEffectiveDate(data, date);
+  const futureChanges = effectiveDate > date;
+  const effectiveDateLabel = formatDate(effectiveDate, { month: "long", day: "numeric", year: "numeric" });
+  const previewStart = mondayOf(effectiveDate);
   const selectedIds = new Set(exercises.map((item) => item.exerciseId));
   const filtered = data.exercises.filter((item) =>
     `${item.name} ${item.group} ${groupName(item.group)} ${item.equipment}`
@@ -135,7 +139,7 @@ export default function WorkoutEditor() {
   );
   const applyDraft = useCallback(
     (current: AppData, template: WorkoutTemplate): AppData =>
-      saveTemplate(current, template, date),
+      saveTemplate(current, template, planEditEffectiveDate(current, date)),
     [date],
   );
   const preview = useMemo(() => {
@@ -277,7 +281,7 @@ export default function WorkoutEditor() {
     setBusy(true);
     setMessage(null);
     try {
-      update((current) => archiveTemplate(current, id, date));
+      update((current) => archiveTemplate(current, id, planEditEffectiveDate(current, date)));
       setPendingCommit("archive");
       await flush();
       setPendingCommit(null);
@@ -395,6 +399,9 @@ export default function WorkoutEditor() {
         <Txt muted>
           Choose your exercises, training days, and how often this plan repeats.
         </Txt>
+        {futureChanges && (
+          <Txt bold>Changes take effect {effectiveDateLabel}.</Txt>
+        )}
         <Card>
           <Field
             label="Workout name"
@@ -637,7 +644,7 @@ export default function WorkoutEditor() {
             setCustomError(null);
           }}
         />
-        <SectionTitle>This week & next</SectionTitle>
+        <SectionTitle>{futureChanges ? "Upcoming two weeks" : "This week & next"}</SectionTitle>
         {preview.error ? (
           <Card>
             <Txt style={{ color: colors.danger }}>{preview.error}</Txt>
@@ -654,7 +661,11 @@ export default function WorkoutEditor() {
                 return (
                   <Card key={start}>
                     <Row style={styles.sectionRow}>
-                      <Txt bold>{week === 0 ? "This week" : "Next week"}</Txt>
+                      <Txt bold>
+                        {futureChanges
+                          ? week === 0 ? "Starting week" : "Following week"
+                          : week === 0 ? "This week" : "Next week"}
+                      </Txt>
                       <Txt muted style={styles.small}>
                         {formatDate(start)}
                       </Txt>
@@ -705,8 +716,10 @@ export default function WorkoutEditor() {
           )
         )}
         <Txt muted style={styles.small}>
-          Changes start today. Previous schedules and recorded workouts stay in
-          your history.
+          {futureChanges
+            ? "Changes take effect " + effectiveDateLabel + ". "
+            : "Changes start today. "}
+          Previous schedules and recorded workouts stay in your history.
         </Txt>
         {(message || status === "error") && (
           <Card>
@@ -758,7 +771,10 @@ export default function WorkoutEditor() {
               </SectionTitle>
               <Txt muted>
                 {confirmation === "archive"
-                  ? "This plan leaves your schedule starting today. Previous workout records and schedules are kept."
+                  ? (futureChanges
+                    ? "This plan leaves your schedule on " + effectiveDateLabel + ". "
+                    : "This plan leaves your schedule starting today. ") +
+                    "Previous workout records and schedules are kept."
                   : confirmation === "unsaved"
                     ? "Please retry saving before leaving. Your changes are still here."
                     : "Your unsaved plan changes will be discarded. Exercises already added to your library are kept."}

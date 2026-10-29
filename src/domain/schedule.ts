@@ -1,6 +1,15 @@
 import { addDays, mondayOf, dayDifference, parseDate, weekdayIndex } from "./dates";
 import { AppData, newId, ScheduleRevision, WEEKDAYS, WorkoutTemplate } from "./types";
 
+/** Keep editor changes in the pending schedule when a future revision exists. */
+export function planEditEffectiveDate(data: AppData, localDate: string): string {
+  parseDate(localDate);
+  return data.scheduleRevisions.reduce(
+    (effectiveDate, revision) => revision.effectiveDate > effectiveDate ? revision.effectiveDate : effectiveDate,
+    localDate,
+  );
+}
+
 export function templateOccursOn(template: WorkoutTemplate, date: string): boolean {
   const weekday = weekdayIndex(date);
   if (template.archived || !template.weekdays.includes(weekday)) return false;

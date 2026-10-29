@@ -11,6 +11,8 @@ import { snapshot } from "./snapshot";
 import { SaveQueue } from "./saveQueue";
 import { loadData, writeData } from "./persistence";
 import { Button, Txt, useTheme } from "../components/ui";
+export type AppDataReplacement = AppData | ((current: AppData) => AppData);
+
 interface AppContextValue {
   data: AppData;
   status: SaveStatus;
@@ -18,7 +20,7 @@ interface AppContextValue {
   update: (fn: (data: AppData) => AppData) => void;
   flush: () => Promise<void>;
   retry: () => Promise<void>;
-  replace: (next: AppData) => Promise<void>;
+  replace: (next: AppDataReplacement) => Promise<void>;
 }
 const Context = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -117,11 +119,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       throw e;
     }
   }
-  async function replace(value: AppData) {
+  async function replace(value: AppDataReplacement) {
     if (restoring.current) throw new Error("A restore is already running.");
     if (!dataRef.current) throw new Error("Your workouts are still loading.");
-    const next = snapshot(value);
     const current = dataRef.current;
+    // Resolve imports against the latest journal, after the picker/preview has finished.
+    const next = snapshot(typeof value === "function" ? value(current) : value);
     restoring.current = true;
     const v = ++version.current;
     setStatus("saving");

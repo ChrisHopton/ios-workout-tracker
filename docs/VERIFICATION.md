@@ -1,5 +1,19 @@
 # Verification report
 
+## Additive workout-file import — October 29, 2026
+
+Added a collapsed Settings importer for private training-only JSON files. It previews counts and conflicts, requires explicit save/unscheduling consent, and merges against the latest journal. Profile, body weights, existing dates/IDs, upload identity and history remain intact. There is no cloud read, schema/reset change, new dependency, or private workout payload in source. A future imported schedule can be edited or archived before its start with an explicit effective-date notice.
+
+- Application suite: **408 passed**, zero failed, one emulator-only skip (409 total).
+- Firestore emulator: **22 passed**. Rules and deployed configuration are unchanged.
+- TypeScript and ESLint: passed.
+- Production iOS export: **3,329,233-byte Hermes bundle**, **3,743,770 bytes** complete export; +20,580 bytes against the prior export.
+- Runtime fingerprint remains **fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06**, matching the installed preview build.
+- Expo Doctor: **20/21**, with the existing Expo 57.0.29/57.0.31, Router 57.0.27/57.0.29 and Sharing 57.0.23/57.0.24 patch mismatches. No native dependency changes were made for this OTA.
+- Synthetic browser check: file selection and preview, explicit import confirmation, retained profile/body weight/existing plan, added historical session, restart persistence, pre-start editing and nonduplicating reimport after a plan edit passed. The import preview fit a 375-pixel viewport. Automated tests cover repeated imports, failed persistence/retry, newer edits after preview, ID/date conflicts, future recurrence and archiving.
+
+The private source file was independently reconciled cell for cell and accepted by the production import validator. Its content and provenance remain outside Git and bundled assets. Installed-iPhone file selection/import/upload acceptance remains pending and is distinct from the browser checks. See [WORKOUT_IMPORT.md](WORKOUT_IMPORT.md).
+
 ## Required device profiles and simpler recording — October 28, 2026
 
 This release implements the approved fresh start. Local SQLite advances to 6, the journal/portable format to 3, anonymous credentials/enrollment to 3, and uploaded record envelopes to 2. A phone number is unverified profile data, never an authentication or recovery key. Anonymous Firebase identity, production App Check, private administration and denied client reads remain in place.
@@ -23,7 +37,7 @@ Live cutover on October 28 local (October 29 UTC): closed enrollment, deployed t
 
 Published source commit `71717d32f7b1acc661c645a560b223fa7ec83402` to the compatible preview OTA: group `571d01a7-1b2d-42f0-8066-0cd8ce0a9569`, iOS update `01a185ff-4bd5-7142-a119-fb2024d71e94`, runtime `fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06`. EAS completed its production export (2,666,308-byte packaged Hermes bundle), uploaded it and confirmed publication. The guarded owner command reopened enrollment after confirming App Check remains ENFORCED.
 
-Phone 1: new-profile/local-reset/initial-plus-incremental upload acceptance pending. Phone 2: all acceptance pending separately. Publication does not prove either phone has applied the update. Native keyboard, VoiceOver, larger text and physical-device layout checks remain pending. See [PROFILE_RESET.md](PROFILE_RESET.md) for the ordered rollout and separate phone checklist. Old Sheets retirement remains deferred.
+Phone 1: the owner confirmed the new profile saved and Uploads reached Up to date. Read-only owner inspection at 2026-10-29T04:54:03.790Z confirmed one enabled version 3 installation, 40 version 2 reporting records, a complete required profile, one body-weight measurement and initialUploadComplete true. The anonymous Auth identity predates the reset, and record namespaces match the new binding. No profile field values or tokens were logged. A post-reset completed workout and incremental training upload remain pending. Phone 2: all acceptance pending separately. Native keyboard, VoiceOver, larger text and physical-device layout checks remain pending. See [PROFILE_RESET.md](PROFILE_RESET.md) for the ordered rollout and separate phone checklist. Old Sheets retirement remains deferred.
 
 ## App Check consumer API repair - October 28, 2026
 
