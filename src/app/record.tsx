@@ -21,6 +21,7 @@ import {
   useTheme,
 } from "../components/ui";
 import { SaveIndicator } from "../components/SaveIndicator";
+import { suggestionReasonForDisplay } from "../components/suggestionPresentation";
 export default function RecordWorkout() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, update, flush, retry, status } = useApp();
@@ -195,7 +196,7 @@ export default function RecordWorkout() {
             <Txt bold style={{ fontSize: 12, color: t.accent }}>
               NEXT STEP
             </Txt>
-            <Txt style={{ fontSize: 13 }}>{e.suggestion.reason}</Txt>
+            <Txt style={{ fontSize: 13 }}>{suggestionReasonForDisplay(e.suggestion.reason)}</Txt>
           </View>
           <Row style={{ gap: 8 }}>
             <Txt muted style={{ width: 26, fontSize: 11 }}>
@@ -328,7 +329,7 @@ export default function RecordWorkout() {
       )}
       <Txt muted style={{ fontSize: 12, textAlign: "center" }}>
         Suggestions are based on your recorded training. Adjust the weight to
-        suit how you feel. Warm-ups do not count toward working-set progression or strength analytics.
+        suit how you feel. Warm-ups do not count toward working-set progression or volume totals.
       </Txt>
     </Screen>
   );

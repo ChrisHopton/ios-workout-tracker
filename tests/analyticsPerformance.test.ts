@@ -101,7 +101,7 @@ test("recommendations preserve start time ordering and stable ties", () => {
   );
 });
 
-test("analytics preserve set ranking bodyweight records and weekly boundaries", () => {
+test("analytics preserve working-set totals, bodyweight counts and weekly boundaries", () => {
   const data = initialData();
   const definition = data.exercises[0];
   const older = session(definition, "2025-03-09");
@@ -138,20 +138,13 @@ test("analytics preserve set ranking bodyweight records and weekly boundaries", 
   assert.equal(result.completedWorkouts, 2);
   assert.equal(result.completedSets, 7);
   assert.deepEqual(result.weeks.map((week) => week.totalSets), [3, 4]);
-  const weighted = result.exerciseHistory.find((history) => history.exerciseId === definition.id)!;
-  assert.equal(weighted.name, "Renamed squat");
-  assert.deepEqual(weighted.points, [
-    { date: "2025-03-09", weight: 100, reps: 15, sets: 3 },
-    { date: "2025-03-10", weight: convertWeight(50, "kg", "lb"), reps: 12, sets: 2 },
-  ]);
-  assert.deepEqual(weighted.heaviestSet, {
-    date: "2025-03-10", weight: convertWeight(50, "kg", "lb"), reps: 12,
-  });
-  const unweighted = result.exerciseHistory.find((history) => history.exerciseId === bodyweight.id)!;
-  assert.deepEqual(unweighted.points, [
-    { date: "2025-03-10", weight: null, reps: 25, sets: 2 },
-  ]);
-  assert.equal(unweighted.heaviestSet, null);
+  assert.deepEqual(result.weeks.map((week) => week.completedWorkouts), [1, 1]);
+  assert.equal(result.weeks[0].volume, 4500);
+  assert.equal(result.weeks[1].volume, convertWeight(50, "kg", "lb") * 23);
+  assert.equal(result.volume, result.weeks[0].volume + result.weeks[1].volume);
+  assert.equal(result.groups.find((group) => group.group === definition.group)?.sets, 5);
+  assert.equal(result.groups.find((group) => group.group === bodyweight.group)?.sets, 2);
+  assert.deepEqual(result.lastWorkout, { id: latest.id, title: latest.title, date: latest.date, workingSets: 4 });
   assert.deepEqual(data, original);
 });
 

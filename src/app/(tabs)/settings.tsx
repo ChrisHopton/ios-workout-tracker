@@ -3,7 +3,6 @@ import { View } from "react-native";
 import { useApp } from "../../data/store";
 import { Unit } from "../../domain/types";
 import {
-  Button,
   Card,
   Chip,
   Field,
@@ -70,22 +69,15 @@ export default function Settings() {
   );
   const [heightEdited, setHeightEdited] = useState(false);
   const profileSave = useSaveAction();
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [query, setQuery] = useState("");
-  const [exerciseId, setExerciseId] = useState("");
-  const [increment, setIncrement] = useState("");
-  const [showIncrements, setShowIncrements] = useState(false);
-  const exercise = data.exercises.find((item) => item.id === exerciseId);
 
   async function action(work: () => Promise<void>) {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError("");
-    setMessage("");
     try {
       await work();
     } catch (cause) {
@@ -119,11 +111,6 @@ export default function Settings() {
       setCanonicalHeight(cm);
       setHeight(heightFields(cm));
       setHeightEdited(false);
-      setIncrement(
-        exercise
-          ? String(unit === "lb" ? exercise.incrementLb : exercise.incrementKg)
-          : "",
-      );
       await flush();
     });
   }
@@ -161,7 +148,6 @@ export default function Settings() {
           <Txt style={{ color: t.danger }}>{error}</Txt>
         </Card>
       )}
-      {!!message && <Txt style={{ color: t.success }}>{message}</Txt>}
       <Card>
         <SectionTitle>Units</SectionTitle>
         <Row style={{ flexWrap: "wrap" }}>
@@ -228,92 +214,6 @@ export default function Settings() {
             <Txt style={{ color: t.danger }}>{profileSave.error}</Txt>
           </View>
         )}
-      </Card>
-      <Card>
-        <SectionTitle>Weight increments</SectionTitle>
-        <Button title={showIncrements ? "Hide increments" : "Adjust weight increments"} secondary disabled={busy} onPress={() => setShowIncrements(!showIncrements)} />
-        {showIncrements && <>
-          <Field
-            label="Find an exercise"
-            value={query}
-            editable={!busy}
-            onChangeText={(value) => {
-              if (!busyRef.current) setQuery(value);
-            }}
-            placeholder="Search exercises…"
-          />
-          <Row style={{ flexWrap: "wrap", gap: 7 }}>
-            {data.exercises
-              .filter(
-                (item) =>
-                  item.equipment !== "bodyweight" &&
-                  item.name.toLowerCase().includes(query.toLowerCase()),
-              )
-              .slice(0, query ? 12 : 5)
-              .map((item) => (
-                <Chip
-                  key={item.id}
-                  label={item.name}
-                  selected={exerciseId === item.id}
-                  onPress={() => {
-                    if (busyRef.current) return;
-                    setExerciseId(item.id);
-                    setIncrement(
-                      String(
-                        data.settings.unit === "lb"
-                          ? item.incrementLb
-                          : item.incrementKg,
-                      ),
-                    );
-                  }}
-                />
-              ))}
-          </Row>
-          {!!exercise && (
-            <>
-              <Field
-                label={exercise.name + " increment (" + data.settings.unit + ")"}
-                value={increment}
-                editable={!busy}
-                onChangeText={(value) => {
-                  if (!busyRef.current) setIncrement(value.replace(",", "."));
-                }}
-                keyboardType="decimal-pad"
-                maxLength={8}
-              />
-              <Button
-                secondary
-                title="Save increment"
-                disabled={busy}
-                onPress={() => {
-                  void action(async () => {
-                    if (
-                      !/^\d+(\.\d+)?$/.test(increment) ||
-                      Number(increment) < 0.001 ||
-                      Number(increment) > 1000
-                    )
-                      throw new Error("Choose an increment from 0.001 to 1,000.");
-                    update((current) => ({
-                      ...current,
-                      exercises: current.exercises.map((item) =>
-                        item.id === exercise.id
-                          ? {
-                              ...item,
-                              [current.settings.unit === "lb"
-                                ? "incrementLb"
-                                : "incrementKg"]: Number(increment),
-                            }
-                          : item,
-                      ),
-                    }));
-                    await flush();
-                    setMessage("Increment saved.");
-                  });
-                }}
-              />
-            </>
-          )}
-        </>}
       </Card>
       <WorkoutImportSettings disabled={busy} />
       <SyncSettings />

@@ -1,5 +1,19 @@
 # Size and efficiency — October 15, 2026
 
+## Minimal Analytics measurements — October 29, 2026
+
+Measured on Windows with the same pinned dependencies and production export command before/after this change:
+
+| Metric | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Hermes bundle | 3,329,233 bytes | 3,282,570 bytes | −46,663 bytes (−1.40%) |
+| Complete iOS export | 3,743,770 bytes | 3,697,107 bytes | −46,663 bytes (−1.25%) |
+| Added runtime/native dependencies | — | 0 | None |
+
+The removed public benchmark JSON occupied 75,901 source bytes. The export reduction also includes removal of comparison/detail screens and unused Analytics calculations, offset by the new carousel and scroll restoration. These are JavaScript/assets measurements, not signed IPA size, installed size or iPhone latency.
+
+Analytics now aggregates only the displayed totals, weekly series, muscle totals and most recent completed workout. A temporary browser counter confirmed hidden recording edits and chart pagination do not rerun the summary; returning after a finished edit refreshes it. Layout-gated scroll restoration preserves the selected period/chart and saved vertical position without polling. Instrumentation was removed before export. Physical-phone performance and accessibility checks remain pending.
+
 ## Simpler-screen measurements — October 26, 2026
 
 Windows production exports using the same pinned dependencies: Hermes changed from 3,236,684 to 3,278,364 bytes (+41,680; 1.29%). The complete export changed from 3,651,221 to 3,692,901 bytes (+41,680; 1.14%). No runtime or native dependency was added. These measure JavaScript/assets, not installed IPA size or phone latency.

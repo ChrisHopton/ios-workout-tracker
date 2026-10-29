@@ -142,3 +142,34 @@ test("bodyweight remains reps-only and new sessions preserve prior suggestion sn
   assert.equal(data.sessions[0].exercises[0].suggestion.algorithmVersion, 1);
   assert.deepEqual(data.sessions[0].exercises[0].suggestion.weights, [40, 80]);
 });
+
+
+test("stored custom increments still control increases and reductions in both units without mutating history", () => {
+  for (const [unit, weight, increment] of [["lb", 50, 1.25], ["kg", 25, 0.5]] as const) {
+    for (const [reps, direction] of [["12", 1], ["7", -1]] as const) {
+      let data = initialData();
+      data.exercises[0].incrementLb = 1.25;
+      data.exercises[0].incrementKg = 0.5;
+      data = addSession(data, "2025-01-06", [result(String(weight), reps), result(String(weight), reps)], { unit });
+      data = addSession(data, "2025-01-13", [result(String(weight), reps), result(String(weight), reps)], { unit });
+      const before = structuredClone(data);
+      const suggestion = suggest(data, target, "2025-01-20", unit);
+      assert.deepEqual(suggestion.weights, [weight + direction * increment, weight + direction * increment]);
+      assert.equal(suggestion.algorithmVersion, 2);
+      assert.deepEqual(data, before);
+    }
+  }
+});
+
+test("the unchanged ten-percent guard explains a hold without directing users to retired controls", () => {
+  let data = addSession(initialData(), "2025-01-06", [result("50"), result("50")]);
+  data = addSession(data, "2025-01-13", [result("50"), result("50")]);
+  data.exercises[0].incrementLb = 5.1;
+  const before = structuredClone(data);
+  assert.deepEqual(suggest(data), {
+    algorithmVersion: 2,
+    weights: [50, 50],
+    reason: "Hold 50 lb. Automatic changes are paused to keep weight steps within 10% of your current load.",
+  });
+  assert.deepEqual(data, before);
+});

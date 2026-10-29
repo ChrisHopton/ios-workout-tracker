@@ -8,7 +8,19 @@ Record device, iOS version, build number, tester, and date here:
 - Build:
 - Tester / date:
 
-## Current rollout - required device profiles
+## Current update - minimal Analytics
+
+This update preserves the current SQLite 6 / journal 3 data and private upload identity. Do not repeat the earlier profile reset. Installed-device checks remain pending until performed.
+
+- [ ] Analytics shows two totals, Last workout completed, and one carousel; no recent-exercise, comparison or detail-screen links remain.
+- [ ] The last workout follows its recorded date, not an imported timestamp, and remains visible outside the chosen period. Viewing it does not reopen it; editing still does.
+- [ ] Swipe all three charts and use each 44-point pagination control. Check snapping and the next-card edge on a small iPhone and Pro Max, including rotation and larger text.
+- [ ] VoiceOver announces chart position and chart summaries; light/dark layouts remain readable with no clipping.
+- [ ] Chart, period and vertical scroll survive switching tabs and opening/returning from a workout. Hidden recording edits do not recompute Analytics; reopening/resuming refreshes it.
+- [ ] Settings and custom-exercise creation have no increment fields. Automatic suggestions, existing custom steps, and separate actual values remain unchanged.
+- [ ] Profile, measurements, imported plans/history and Uploads survive the OTA. Verify a subsequent incremental upload on each phone separately.
+
+## Earlier rollout - required device profiles
 
 Use [profile reset rollout](PROFILE_RESET.md) for the exact cutover and per-phone acceptance. First-phone uploads were verified before this release; profile-release acceptance is separate and must be recorded again. Keep both apps installed and pause recording until the new profile form appears.
 
@@ -50,8 +62,8 @@ Use [profile reset rollout](PROFILE_RESET.md) for the exact cutover and per-phon
 
 - [ ] Finish two matching workouts at the upper rep target. Verify the next suggestion and its reason; check no-history/bodyweight states too.
 - [ ] Skipped sets and unfinished workouts do not inflate charts. A historical day does not use later performance for suggestions.
-- [ ] Review 4-, 8-, and 12-week charts, muscle group totals, exercise history, and scheduled completion.
-- [ ] Set Analytics filters and scroll. Leave to record a workout, then return: results update while the filters and scroll position remain. Analytics contains no body-weight form or profile editing controls.
+- [ ] Review 4-, 8-, and 12-week charts, muscle-group totals, last-workout selection, and scheduled completion.
+- [ ] Set the Analytics period, carousel card and scroll. Leave to record a workout, then return: results update while the period, carousel card and scroll position remain. Analytics contains no body-weight form or profile editing controls.
 - [ ] Background/resume Analytics and cross local midnight with the app open or backgrounded. Verify date-sensitive ranges and scheduled completion refresh for the new day.
 - [ ] Change pounds/kilograms and height units; historical weights convert appropriately without changing stored session units or losing fractions.
 - [ ] Edit name, phone, DOB and gender; save, close/reopen, and confirm persistence. Age follows DOB including birthdays. Demographics do not change progression rules.
@@ -60,7 +72,7 @@ Use [profile reset rollout](PROFILE_RESET.md) for the exact cutover and per-phon
 
 Follow the staged owner rollout in [Firestore setup](FIREBASE.md). Emulator tests do not establish native attestation. Do not enable automatic enrollment until Firestore App Check enforcement and real-service rejection checks pass.
 
-- [ ] Install a compatible OTA or signed build over the existing app on both phones. This release intentionally clears old local history once. Verify both UDIDs and production App Attest entitlement in the signed profile.
+- [ ] Install a compatible OTA or signed build over the existing app on both phones. The earlier required-profile release cleared old local history once; this Analytics update does not reset data. Verify both UDIDs and production App Attest entitlement in the signed profile.
 - [ ] Open each phone online and verify valid App Attest token metrics. Confirm no debug provider or tokens are configured.
 - [ ] Enforce Firestore App Check, verify missing/invalid tokens fail in the real service, then enable automatic enrollment using the owner tool.
 - [ ] Settings has the gender selector, disclosure and compact read-only upload status; no database forms, code entry, rename, replacement or Disconnect controls.
@@ -78,7 +90,7 @@ Follow the staged owner rollout in [Firestore setup](FIREBASE.md). Emulator test
 
 ## Updates and internal migration safeguards
 
-- [ ] Confirm Settings has no backup, import, export, pre-migration-copy, or recovery buttons.
+- [ ] Confirm Settings offers the additive Import plans and workouts control, with no full backup/export/recovery controls.
 - [ ] Install a newer preview build over the app with the same identifier; the authorized profile migration moves to SQLite version 6 and journal format 3, clearing old history once. Verify no new recovery copy of deliberately deleted data is created and existing app-managed recovery copies are removed. No user-facing restore workflow is expected.
 - [ ] On an OTA-enabled test build with a matching runtime, verify this one-time profile update resets old journal data while retaining proven anonymous authentication. Later compatible updates must retain the new journal and must not repeat the reset. A build lacking required native modules must use a new binary.
 - [ ] Record installed app and Documents & Data sizes in iPhone Storage before and after adding representative history. Check recording and chart responsiveness on the phone.
@@ -94,12 +106,14 @@ Open issues / screenshots / results:
 - [ ] Record 40 lb × 12 and 80 lb × 10 for an 8–12 target; the next session suggests 75 lb at a 5 lb increment, with an explanation.
 - [ ] Warm-up labels persist and exclude those sets from progression/working-set totals. No effort input is required.
 - [ ] Check two-workout increases and reductions, unit changes, historical dates, skipped sets, and long gaps.
-- [ ] Add/edit/delete dated body weights only in Settings; units preserve canonical kg and Analytics updates its read-only history/ratios. Ratios use a measurement on or before each workout.
-- [ ] Read estimated-strength charts, all-time records, volume, empty states, and dated body-weight ratios with large text and both themes.
-- [ ] Verify original results/suggestions, pending uploads, and internal migration copies survive upgrade/restart. Settings increment controls start collapsed and open through Adjust weight increments.
+- [ ] Add/edit/delete dated body weights only in Settings; units preserve canonical kg and measurements remain available for private uploads.
+- [ ] Read volume, workout counts, muscle-group sets and empty states with large text and both themes.
+- [ ] Verify original results/suggestions, pending uploads, and internal migration copies survive upgrade/restart. Existing increment values remain stored and there are no manual increment controls.
 
 
-## October 22 Settings and comparison acceptance (pending on iPhone)
+## Historical October 22 Settings and comparison checklist
+
+Comparison-only checks below were superseded by the minimal-Analytics release; they are retained as historical records, not current acceptance requirements.
 
 - [ ] Profile offers only Female/Male; save confirmation stays beside the button until another edit.
 - [ ] Weight input and Save fit a Pro Max screen, wrap with larger Dynamic Type, and remain usable above the keyboard.

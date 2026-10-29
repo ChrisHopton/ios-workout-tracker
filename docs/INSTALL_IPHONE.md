@@ -1,5 +1,7 @@
 # Install Workout on your iPhone from Windows
 
+The current minimal-Analytics update preserves the existing profile, history and uploads. It introduces no reset or native dependencies. Use the compatible preview OTA; do not uninstall.
+
 The required-device-profile release intentionally starts both phones fresh. Follow [profile reset rollout](PROFILE_RESET.md), pause recording until onboarding appears, and do not uninstall. Later updates preserve the new journal. Phone numbers are profile information, not login credentials.
 
 The `preview` profile creates a standalone private iPhone app with its JavaScript and assets bundled. After installation, recording and analytics work offline with your Windows PC switched off. This is an EAS internal distribution build. [Expo's preview-build guide](https://docs.expo.dev/tutorial/eas/internal-distribution-builds/)
@@ -70,7 +72,7 @@ After enabling, keep each phone open online until the initial history finishes. 
 
 On Home, pick a date in the seven-day strip and use the single workout card to start, resume or view a session. **Plans** in the header opens **Workout Plans**. Rest days offer **Choose workout**; future dates remain view-only. Create and edit plans, choose Weekly or Every 2 weeks, and review the dated two-week preview. Existing custom schedules remain unchanged until their recurrence is explicitly changed.
 
-Analytics opens at eight weeks with two totals, a weekly workout chart and recent exercise rows. Use **See all** to find an exercise, then review its metric chart and personal best. Workout history and relative strength expand on demand. Muscle groups and volume are under **Training details**; body-weight references are under **Comparisons**. The next-workout card is no longer part of Analytics. Record working and optional warm-up sets in the workout screen; enter optional body-weight measurements in Settings. No effort rating is required.
+Analytics opens at eight weeks with two totals, a compact last-completed-workout card, and one swipeable chart carousel: weekly volume, workouts by week, then working sets by muscle group. The next chart peeks into view; accessible pagination dots also switch charts. Short info controls explain units and counting. Tap the last workout to view its saved recording without changing its completion state. Record working and optional warm-up sets in the workout screen; enter body weight in Settings. Exercise-detail and comparison screens have been removed. Suggested weights adjust automatically under the existing progression rules; Settings and custom-exercise creation no longer ask for step sizes.
 
 Install updates over the existing app to preserve its current version 6 journal, credentials, and in-flight uploads. Settings includes a collapsed **Import plans and workouts** control for prepared training-only JSON files. This adds records to the existing profile; it is not a full-journal restore. There are no full backup/export or cloud restore controls. See [import steps and safeguards](WORKOUT_IMPORT.md).
 
@@ -118,8 +120,8 @@ Expo Go cannot load this app's native Firebase modules. Use a development build 
 If installation fails, check iOS version, selected UDID, Developer Mode, Apple device-processing status, and signing expiry. If the app asks for a development server, install a `preview` build. Keep the existing installation when troubleshooting so its local data remains available.
 
 
-## Settings and offline comparisons
+## Settings and offline analytics
 
 Interface changes and bundled reference tables can use OTA only when the installed binary has the matching runtime. They do not replace required native App Check modules or the attestation/enforcement rollout described above.
 
-Install updates over the existing app to preserve local workouts. In Settings, choose Female or Male and save the profile; the button confirms ✓ Saved after local persistence. Record body weight using the compact input; entering another value today updates today’s record. Expand Change date or History only when needed. Analytics uses downloaded-at-build-time aggregate tables offline; phones never request benchmark or workout records from Firestore. The optional competitor line appears under Estimated max for barbell squat, bench press and deadlift.
+Install updates over the existing app to preserve local workouts. In Settings, choose Female or Male and save the profile; the button confirms ✓ Saved after local persistence. Record body weight using the compact input; entering another value today updates today’s record. Expand Change date or History only when needed. Analytics uses only your local workout history and works offline. Public benchmark tables and comparison screens are no longer included. Phones never request workout records from Firestore. Default exercise steps are 5 lb / 2.5 kg, and saved custom steps remain preserved internally.

@@ -1,5 +1,22 @@
 # Verification report
 
+## Minimal Analytics and automatic weight steps — October 29, 2026
+
+Replaced recent exercises and detail navigation with the latest completed workout by recorded date and a three-chart carousel: weekly working-load volume, weekly workout counts, and completed working sets by muscle group. Removed comparison screens, benchmark tables/generation tooling and manual increment controls. Existing saved/imported step sizes and recommendation calculations remain unchanged; only obsolete Settings instructions are normalized at display time. SQLite remains 6, journal/backup format 3, and Firestore contracts and private upload identities are unchanged.
+
+- Application suite: **396 passed**, zero failed, one emulator-only skip (397 total). The lower count reflects removal of obsolete comparison/exercise-history tests and addition of focused summary, carousel and increment regressions.
+- Firestore emulator: **22 passed**. Rules and deployed Firebase configuration are unchanged.
+- Full TypeScript and ESLint: passed.
+- Production iOS export: **3,282,570-byte Hermes bundle**, **3,697,107 bytes** complete export; 46,663 bytes smaller than the preceding export. No runtime/native dependency added.
+- Runtime fingerprint **fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06** matches the latest signed preview build `00474cfc-0dd6-45d3-ada1-f19e7e2b7e3a`, independently checked through EAS build metadata.
+- Expo Doctor: **20/21**. The existing Expo 57.0.29/57.0.31, Router 57.0.27/57.0.29 and Sharing 57.0.23/57.0.24 patch mismatches remain; dependency versions were preserved for this OTA.
+- Synthetic browser checks: 375×812 and 430×932 layouts, landscape width recalculation, visible next-card edge, horizontal scrolling/snapping, all pagination controls, chart accessibility summaries, period/chart retention, lb/kg volume, Settings control removal and read-only completed-workout viewing passed. Scroll restoration was corrected to wait for visible chart layout; measured offsets 134 and 14 survived workout return, and offset 388 survived a tab switch with information expanded.
+- A temporary summary counter stayed at two while editing an existing workout with Analytics hidden and became three after finishing and returning. Chart taps did not increment the counter. All temporary instrumentation was removed before the final checks/export.
+
+Automated regressions cover imported timestamps, retrospective/future/unfinished sessions, all-history latest-workout selection outside the period, skipped/warm-up/bodyweight sets, volume conversion, muscle-group totals, existing increment preservation and exact legacy suggestion wording. Removed screen names and benchmark consumers have no remaining runtime references.
+
+Physical iPhone acceptance remains pending separately for both phones: native snapping/VoiceOver, Dynamic Type, light/dark display, preserved local history and subsequent uploads. Browser sync was mocked and used synthetic data; no real profile or workout contents entered diagnostics. No reinstall or data reset is expected. See [device checklist](DEVICE_CHECKLIST.md).
+
 ## Additive workout-file import — October 29, 2026
 
 Added a collapsed Settings importer for private training-only JSON files. It previews counts and conflicts, requires explicit save/unscheduling consent, and merges against the latest journal. Profile, body weights, existing dates/IDs, upload identity and history remain intact. There is no cloud read, schema/reset change, new dependency, or private workout payload in source. A future imported schedule can be edited or archived before its start with an explicit effective-date notice.

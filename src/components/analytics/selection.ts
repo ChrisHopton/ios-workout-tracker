@@ -1,37 +1,30 @@
-import { ExerciseHistory } from "../../domain/analytics";
-import { Equipment, MuscleGroup } from "../../domain/types";
-
 export const ANALYTICS_PERIODS = [4, 8, 12] as const;
 export type AnalyticsPeriod = typeof ANALYTICS_PERIODS[number];
-export type ProgressMetric = "weight" | "reps" | "strength";
-export type ExerciseFilter = MuscleGroup | "All";
+export const ANALYTICS_CHARTS = ["Weekly volume", "Workouts by week", "Sets by muscle group"] as const;
+export const CHART_GAP = 12;
+export const CHART_PEEK = 16;
 
-export function recentExercises(histories: readonly ExerciseHistory[], limit = 5): ExerciseHistory[] {
-  return histories.filter((history) => history.points.length > 0).sort((a, b) =>
-    b.points[b.points.length - 1].date.localeCompare(a.points[a.points.length - 1].date)
-    || a.name.localeCompare(b.name) || a.variantId.localeCompare(b.variantId),
-  ).slice(0, limit);
+export function carouselLayout(width: number) {
+  const viewport = Number.isFinite(width) ? Math.max(0, width) : 0;
+  const cardWidth = Math.max(0, viewport - CHART_GAP - CHART_PEEK);
+  return { cardWidth, interval: cardWidth + CHART_GAP, endPadding: viewport - cardWidth };
 }
 
-export function filterExercises(histories: readonly ExerciseHistory[], query: string, group: ExerciseFilter): ExerciseHistory[] {
-  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  return recentExercises(histories, histories.length).filter((history) => {
-    const label = `${history.name} ${history.equipment} ${history.group}`.toLocaleLowerCase();
-    return (group === "All" || history.group === group) && terms.every((term) => label.includes(term));
-  });
+export function carouselIndex(offset: number, interval: number, count = ANALYTICS_CHARTS.length): number {
+  if (!Number.isFinite(offset) || !Number.isFinite(interval) || interval <= 0 || count <= 0) return 0;
+  return Math.max(0, Math.min(count - 1, Math.round(offset / interval)));
 }
 
-export function exerciseRoute(variantId: string) {
-  return { pathname: "/analytics-exercise" as const, params: { variantId } };
+export function workoutRoute(id: string) {
+  return { pathname: "/record" as const, params: { id } };
 }
 
-export function selectedExercise(histories: readonly ExerciseHistory[], variantId: string | string[] | undefined): ExerciseHistory | undefined {
-  // A missing or stale link must never silently open a different exercise or equipment variant.
-  return typeof variantId === "string" ? histories.find((history) => history.variantId === variantId) : undefined;
+export function chartNumber(value: number, compact = false): string {
+  return new Intl.NumberFormat("en-US", compact
+    ? { notation: "compact", maximumFractionDigits: 1 }
+    : { maximumFractionDigits: 2 }).format(value);
 }
 
-export function effectiveMetric(equipment: Equipment, metric: ProgressMetric): ProgressMetric {
-  return equipment === "bodyweight" ? "reps" : metric;
+export function chartDescription(title: string, values: readonly number[], labels: readonly string[], unit = ""): string {
+  return `${title}. ${values.map((value, index) => `${labels[index]}: ${chartNumber(value)}${unit ? ` ${unit}` : ""}`).join("; ")}.`;
 }
-
-export const round = (value: number) => Math.round(value * 100) / 100;

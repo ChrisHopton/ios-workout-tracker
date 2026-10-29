@@ -46,6 +46,9 @@ import {
   newId,
 } from "../domain/types";
 
+const DEFAULT_INCREMENT_LB = 5;
+const DEFAULT_INCREMENT_KG = 2.5;
+
 type DraftExercise = {
   exerciseId: string;
   sets: string;
@@ -91,8 +94,6 @@ export default function WorkoutEditor() {
   const [customName, setCustomName] = useState("");
   const [customGroup, setCustomGroup] = useState<MuscleGroup>("Legs");
   const [customEquipment, setCustomEquipment] = useState<Equipment>("dumbbell");
-  const [incrementLb, setIncrementLb] = useState("5");
-  const [incrementKg, setIncrementKg] = useState("2.5");
   const customId = useRef<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [customError, setCustomError] = useState<string | null>(null);
@@ -317,18 +318,6 @@ export default function WorkoutEditor() {
       );
       return;
     }
-    if (
-      customEquipment !== "bodyweight" &&
-      ![incrementLb, incrementKg].every(
-        (value) =>
-          /^\d+(\.\d+)?$/.test(value) &&
-          Number(value) >= 0.001 &&
-          Number(value) <= 1000,
-      )
-    ) {
-      setCustomError("Enter weight increments from 0.001 to 1,000.");
-      return;
-    }
     busyRef.current = true;
     setBusy(true);
     setCustomError(null);
@@ -337,8 +326,8 @@ export default function WorkoutEditor() {
       name,
       group: customGroup,
       equipment: customEquipment,
-      incrementLb: customEquipment === "bodyweight" ? 5 : Number(incrementLb),
-      incrementKg: customEquipment === "bodyweight" ? 2.5 : Number(incrementKg),
+      incrementLb: DEFAULT_INCREMENT_LB,
+      incrementKg: DEFAULT_INCREMENT_KG,
     };
     customId.current = definition.id;
     try {
@@ -865,37 +854,6 @@ export default function WorkoutEditor() {
                 ))}
               </View>
               <Txt muted>{loadLabel(customEquipment)}</Txt>
-              {customEquipment !== "bodyweight" && (
-                <Card>
-                  <Txt bold>Weight increments</Txt>
-                  <Txt muted style={styles.small}>
-                    The smallest increase available for this exercise. For
-                    dumbbells, enter the increase per dumbbell.
-                  </Txt>
-                  <Row style={styles.fields}>
-                    <View style={styles.grow}>
-                      <Field
-                        label="Pounds (lb)"
-                        value={incrementLb}
-                        keyboardType="decimal-pad"
-                        maxLength={8}
-                        editable={!busy && !pendingCommit}
-                        onChangeText={setIncrementLb}
-                      />
-                    </View>
-                    <View style={styles.grow}>
-                      <Field
-                        label="Kilograms (kg)"
-                        value={incrementKg}
-                        keyboardType="decimal-pad"
-                        maxLength={8}
-                        editable={!busy && !pendingCommit}
-                        onChangeText={setIncrementKg}
-                      />
-                    </View>
-                  </Row>
-                </Card>
-              )}
               {customError && (
                 <Txt style={{ color: colors.danger }}>{customError}</Txt>
               )}
@@ -931,8 +889,6 @@ export default function WorkoutEditor() {
                   setCustomName(query.trim());
                   setCustomGroup("Legs");
                   setCustomEquipment("dumbbell");
-                  setIncrementLb("5");
-                  setIncrementKg("2.5");
                   setCustomError(null);
                   setPicker("custom");
                 }}

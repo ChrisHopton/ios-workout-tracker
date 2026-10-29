@@ -374,10 +374,10 @@ test("analytics counts completed sets once, excludes unfinished/future days and 
   assert.equal(result.scheduledWorkouts, 3);
   assert.equal(result.completedScheduledWorkouts, 2);
   assert.ok(Math.abs(result.completionRate! - 200 / 3) < 1e-10);
-  assert.ok(
-    Math.abs(result.exerciseHistory[0].heaviestSet!.weight - 45.359237) < 1e-10,
-  );
-  assert.equal(result.exerciseHistory[0].heaviestSet!.reps, 12);
+  assert.ok(Math.abs(result.volume - convertWeight(100, "lb", "kg") * 12 * 5) < 1e-10);
+  assert.deepEqual(result.lastWorkout, {
+    id: data.sessions[1].id, title: "squat", date: "2025-01-13", workingSets: 2,
+  });
   assert.equal(result.weeks.length, 4);
   const earlier = summarize(data, 4, "2025-01-08", "lb");
   assert.equal(earlier.completedWorkouts, 1);

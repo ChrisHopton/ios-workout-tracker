@@ -1,10 +1,12 @@
-# Offline benchmark sources and regeneration
+# Historical offline benchmark sources and regeneration
+
+Retired October 29, 2026: comparison screens, bundled tables and their generation tools were removed from the current app. This document preserves the earlier methodology and attribution only. Regeneration commands below require the earlier source revision; they are not current setup steps.
 
 The app bundles aggregate reference tables, not participant records. Bodyweight uses a U.S. population survey; strength uses competitive powerlifters. The strength references must never be presented as general-population averages. These comparisons describe a reference group, not a healthy target or an exercise prescription.
 
 ## Pinned inputs
 
-The exact download URLs, byte sizes, SHA-256 hashes, expected data-row counts, and OpenPowerlifting revision are in [benchmark_sources.json](../scripts/benchmark_sources.json). Inputs were retrieved on 2026-10-22.
+The exact download URLs, byte sizes, SHA-256 hashes, expected data-row counts, and OpenPowerlifting revision are in [benchmark_sources.json](https://github.com/ChrisHopton/ios-workout-tracker/blob/da2b008/scripts/benchmark_sources.json). Inputs were retrieved on 2026-10-22.
 
 | Input | Release / snapshot | Data rows | Compressed/source bytes |
 | --- | --- | ---: | ---: |

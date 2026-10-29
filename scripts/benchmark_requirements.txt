@@ -1,2 +1,0 @@
-# Developer-only SAS XPORT reader. No dependency is added to the mobile app.
-pandas==3.0.1

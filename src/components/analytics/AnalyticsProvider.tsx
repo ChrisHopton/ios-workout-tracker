@@ -1,32 +1,29 @@
-import { createContext, ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, ReactNode, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { useApp } from "../../data/store";
 import { summarize } from "../../domain/analytics";
-import { ReferenceGroup, referenceGroupForGender } from "../../domain/benchmarks";
 import { today } from "../../domain/dates";
-import { AppData, MuscleGroup } from "../../domain/types";
-import { AnalyticsPeriod, ExerciseFilter } from "./selection";
+import { AppData } from "../../domain/types";
+import { AnalyticsPeriod } from "./selection";
 
 function useAnalyticsState() {
   const [weeks, setWeeks] = useState<AnalyticsPeriod>(8);
-  const [query, setQuery] = useState("");
-  const [exerciseGroup, setExerciseGroup] = useState<ExerciseFilter>("All");
-  const [trainingGroup, setTrainingGroup] = useState<MuscleGroup>("Legs");
-  const [referenceOverride, setReferenceOverride] = useState<ReferenceGroup | null | undefined>(undefined);
+  const [chartIndex, setChartIndex] = useState(0);
+  const scrollOffset = useRef(0);
+  const getScrollOffset = useCallback(() => scrollOffset.current, []);
+  const saveScrollOffset = useCallback((offset: number) => { scrollOffset.current = offset; }, []);
   const [snapshot, setSnapshot] = useState<{ data: AppData; endDate: string } | null>(null);
   const refresh = useCallback((data: AppData) => {
     const endDate = today();
     setSnapshot((previous) => previous?.data === data && previous.endDate === endDate ? previous : { data, endDate });
   }, []);
-  // App data is already immutable. Keep its visible reference while every Analytics route is hidden.
+  // Keep the last visible immutable data snapshot while Analytics is hidden.
   const result = useMemo(() => snapshot ? summarize(snapshot.data, weeks, snapshot.endDate, snapshot.data.settings.unit) : null, [snapshot, weeks]);
-  const referenceGroup = referenceOverride === undefined ? referenceGroupForGender(snapshot?.data.settings.gender ?? "") : referenceOverride;
   return useMemo(() => ({
     data: snapshot?.data ?? null, result, refresh, weeks, setWeeks,
-    query, setQuery, exerciseGroup, setExerciseGroup, trainingGroup, setTrainingGroup,
-    referenceGroup, referenceOverride, setReferenceOverride,
-  }), [snapshot, result, refresh, weeks, query, exerciseGroup, trainingGroup, referenceGroup, referenceOverride]);
+    chartIndex, setChartIndex, getScrollOffset, saveScrollOffset,
+  }), [snapshot, result, refresh, weeks, chartIndex, getScrollOffset, saveScrollOffset]);
 }
 
 const Context = createContext<ReturnType<typeof useAnalyticsState> | null>(null);

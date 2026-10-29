@@ -147,7 +147,7 @@ export function suggestWeights(
     dayDifference(latest.session.date, previous.session.date) > 28))
     return hold(`Hold ${clean(consistent)} ${unit}. A training gap exceeding 28 days pauses automatic increases.`);
   if (!validIncrement || consistent <= 0 || increment / consistent > 0.1 + Number.EPSILON)
-    return hold(`Hold ${clean(consistent)} ${unit}. The configured increment would exceed 10%; choose a smaller increment in Settings.`);
+    return hold(`Hold ${clean(consistent)} ${unit}. Automatic changes are paused to keep weight steps within 10% of your current load.`);
   if (minimumMissed)
     return suggestion(Math.max(0, consistent - increment),
       `A working set missed ${target.repMin} reps in each of two finished workouts at ${clean(consistent)} ${unit}. Reduce one increment to ${clean(Math.max(0, consistent - increment))} ${unit}.`);
