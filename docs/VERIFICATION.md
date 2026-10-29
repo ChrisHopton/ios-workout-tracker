@@ -12,6 +12,8 @@ Added a collapsed Settings importer for private training-only JSON files. It pre
 - Expo Doctor: **20/21**, with the existing Expo 57.0.29/57.0.31, Router 57.0.27/57.0.29 and Sharing 57.0.23/57.0.24 patch mismatches. No native dependency changes were made for this OTA.
 - Synthetic browser check: file selection and preview, explicit import confirmation, retained profile/body weight/existing plan, added historical session, restart persistence, pre-start editing and nonduplicating reimport after a plan edit passed. The import preview fit a 375-pixel viewport. Automated tests cover repeated imports, failed persistence/retry, newer edits after preview, ID/date conflicts, future recurrence and archiving.
 
+Published source commit `8bc3b75938b01313e3add48ab02b4911e3ff217d` to preview: update group `88caf352-e6f2-406e-9541-93f6215555bf`, iOS update `01a18615-8c47-7207-91fa-24add3b81e7f`. EAS confirmed the unchanged runtime fingerprint. This release contains the importer only; the private file is delivered separately for explicit selection on the intended phone.
+
 The private source file was independently reconciled cell for cell and accepted by the production import validator. Its content and provenance remain outside Git and bundled assets. Installed-iPhone file selection/import/upload acceptance remains pending and is distinct from the browser checks. See [WORKOUT_IMPORT.md](WORKOUT_IMPORT.md).
 
 ## Required device profiles and simpler recording — October 28, 2026
