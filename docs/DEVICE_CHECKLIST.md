@@ -8,15 +8,15 @@ Record device, iOS version, build number, tester, and date here:
 - Build:
 - Tester / date:
 
-## Current rollout — first phone
+## Current rollout - required device profiles
 
-The October 26 preview update is published. Verify the primary phone first; second-phone attestation and uploads are explicitly deferred. Keep both apps installed.
+Use [profile reset rollout](PROFILE_RESET.md) for the exact cutover and per-phone acceptance. First-phone uploads were verified before this release; profile-release acceptance is separate and must be recorded again. Keep both apps installed and pause recording until the new profile form appears.
 
-- [ ] After two online launches, Settings → Uploads shows update ID starting 01a17b68 and runtime fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06.
-- [ ] Confirm valid production App Check metrics with enrollment still closed. Monitoring-only mode must be active first; default OFF collects no metrics.
-- [ ] Confirm enforcement, allow propagation and verify real missing/invalid-token rejection before the guarded enrollment command.
-- [ ] On the primary phone, initial history is Uploaded, pending changes are zero, and a confirmed upload time is present. Verify owner-side records, then edit one set and verify a newer revision. Record counts/revisions/timestamps without copying workout contents or tokens into logs.
-- [ ] Exercise the new overview/detail navigation; period, search and scroll survive Back. Retry never bypasses an active quota/backoff and never replaces a revoked/corrupt identity.
+- [ ] Updated app resets old local data once and shows required profile onboarding.
+- [ ] Profile and starting weight persist before Home opens; failure preserves inputs and Retry works.
+- [ ] Restart does not reset the new profile/history again; offline onboarding works.
+- [ ] Owner confirms enrollment v3, envelope v2, initial completion and later revisions without logging personal values.
+- [ ] Repeat independently on the second phone when its update activates.
 
 ## Install and presentation
 
@@ -41,7 +41,7 @@ The October 26 preview update is published. Verify the primary phone first; seco
 - [ ] Rapidly enter, change, and clear weights/reps; wait for Saved. Navigate away and return; values must match exactly.
 - [ ] Force-close and reopen after Saved; unfinished workouts resume with no duplicate session.
 - [ ] Accept a suggestion, override it, and confirm actual values remain distinct from the suggestion until accepted.
-- [ ] Attempt to finish with pending sets; resolve each by completing or explicitly skipping. Reopen a finished workout and edit it.
+- [ ] Verify no completion checkboxes remain; valid actual weight/reps count automatically. Finish with missing sets asks before skipping; cancel retains the draft. Invalid entered values must be corrected or cleared. Reopen a finished workout and edit it.
 - [ ] Dumbbell loads say per dumbbell, barbell loads include the bar, and bodyweight exercises accept reps without a weight.
 - [ ] When testing storage failure in a development build, show a visible error and Retry, then recover the latest values once storage works. Inject an upload-state database read failure and confirm the journal and outbox both roll back, then both save on retry.
 - [ ] With 1,000 workouts and 100/500 retained schedule revisions, measure recording responsiveness on the phone; compare editing and navigation without deleting history. Desktop measurements alone do not complete this check.
@@ -54,19 +54,19 @@ The October 26 preview update is published. Verify the primary phone first; seco
 - [ ] Set Analytics filters and scroll. Leave to record a workout, then return: results update while the filters and scroll position remain. Analytics contains no body-weight form or profile editing controls.
 - [ ] Background/resume Analytics and cross local midnight with the app open or backgrounded. Verify date-sensitive ranges and scheduled completion refresh for the new day.
 - [ ] Change pounds/kilograms and height units; historical weights convert appropriately without changing stored session units or losing fractions.
-- [ ] Save optional demographics, close/reopen, and confirm they persist without changing progression rules.
+- [ ] Edit name, phone, DOB and gender; save, close/reopen, and confirm persistence. Age follows DOB including birthdays. Demographics do not change progression rules.
 
 ## Automatic private uploads
 
 Follow the staged owner rollout in [Firestore setup](FIREBASE.md). Emulator tests do not establish native attestation. Do not enable automatic enrollment until Firestore App Check enforcement and real-service rejection checks pass.
 
-- [ ] Install the new native build over the existing app on both phones, preserving local history. Verify both UDIDs and production App Attest entitlement in the signed profile.
+- [ ] Install a compatible OTA or signed build over the existing app on both phones. This release intentionally clears old local history once. Verify both UDIDs and production App Attest entitlement in the signed profile.
 - [ ] Open each phone online and verify valid App Attest token metrics. Confirm no debug provider or tokens are configured.
 - [ ] Enforce Firestore App Check, verify missing/invalid tokens fail in the real service, then enable automatic enrollment using the owner tool.
 - [ ] Settings has the gender selector, disclosure and compact read-only upload status; no database forms, code entry, rename, replacement or Disconnect controls.
-- [ ] Select each gender option, cancel the sheet, restart, and verify persisted values. Existing custom values remain until changed. Check light/dark mode, larger text and VoiceOver.
+- [ ] Select each gender option, cancel the sheet, restart, and verify persisted values. Only Male/Female are accepted for the required profile. Check light/dark mode, larger text and VoiceOver.
 - [ ] Verify initial history and completion marker for both phones, then edit a set and verify an incremental upload. Matching labels/source IDs must remain in separate namespaces.
-- [ ] Existing password-connected installations retain their namespaces, revision counters and frozen batches.
+- [ ] Old password layouts, enrollment v2, and record envelope v1 are denied. Frozen pre-reset uploads cannot reappear after cutover.
 - [ ] Start offline; record locally, force-close, reopen and reconnect. Setup resumes the persisted identity; blank and zero remain distinct.
 - [ ] Interrupt enrollment and uploads. Verify identical retry content and no duplicate installation; newer edits remain queued.
 - [ ] Verify denied own/cross-account reads, lists and deletes; app traffic contains only authentication and Firestore commits.
@@ -79,8 +79,8 @@ Follow the staged owner rollout in [Firestore setup](FIREBASE.md). Emulator test
 ## Updates and internal migration safeguards
 
 - [ ] Confirm Settings has no backup, import, export, pre-migration-copy, or recovery buttons.
-- [ ] Install a newer preview build over the app with the same identifier; existing history remains after SQLite version 5 migration. In native development verification, confirm the validated private pre-migration copy is created before migration, including for a valid journal above 10 MiB. No user-facing restore workflow is expected.
-- [ ] On an OTA-enabled test build with a matching runtime, verify a preview-channel update retains journal data and connection state. A build lacking required native modules must use a new binary.
+- [ ] Install a newer preview build over the app with the same identifier; the authorized profile migration moves to SQLite version 6 and journal format 3, clearing old history once. Verify no new recovery copy of deliberately deleted data is created and existing app-managed recovery copies are removed. No user-facing restore workflow is expected.
+- [ ] On an OTA-enabled test build with a matching runtime, verify this one-time profile update resets old journal data while retaining proven anonymous authentication. Later compatible updates must retain the new journal and must not repeat the reset. A build lacking required native modules must use a new binary.
 - [ ] Record installed app and Documents & Data sizes in iPhone Storage before and after adding representative history. Check recording and chart responsiveness on the phone.
 - [ ] If using a second phone, verify it has separate data and works offline.
 

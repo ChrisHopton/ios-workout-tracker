@@ -1,4 +1,25 @@
-# Verification report — October 22, 2026
+# Verification report
+
+## Required device profiles and simpler recording — October 28, 2026
+
+This release implements the approved fresh start. Local SQLite advances to 6, the journal/portable format to 3, anonymous credentials/enrollment to 3, and uploaded record envelopes to 2. A phone number is unverified profile data, never an authentication or recovery key. Anonymous Firebase identity, production App Check, private administration and denied client reads remain in place.
+
+| Check | Result |
+| --- | --- |
+| Application suite | 391 passed, 0 failed, 1 emulator-only skip (392 total) |
+| Firestore emulator | 22 passed, including pre-reset version rejection, legacy path rejection, revocation tombstones, isolation and read denial |
+| TypeScript / ESLint | Passed, zero warnings |
+| Production iOS export | Passed; 3,308,653-byte Hermes bundle; 3,723,190 bytes complete export (about 30 KB above October 26) |
+| Expo checks | 20/21 Doctor checks; install check reports the existing Expo/Router/Sharing patch mismatches. No dependency/native changes were introduced. |
+| Runtime compatibility | Fingerprint fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06 matches installed October 22 preview build |
+| Browser smoke | Required phone validation, lb entry, Male/Female sheet, disclosure, save-before-routing, restart persistence, Settings Saved state, automatic set completion, invalid-input protection, skip confirmation/cancel, and reopening completed workouts verified with synthetic data |
+| Responsive preview | Dark-mode recording and confirmation checked at 375×812 and 430×932. Native keyboard, VoiceOver, larger text and physical phone acceptance remain pending. |
+
+Regressions cover transaction rollback, independent reset-marker persistence, cleanup retries without repeat wiping, crashes around SecureStore changes, latest refresh-token preservation, fixed generation/installation targets, legacy journal paths, pending signup, authentication rejection, offline/profile saves, prior backup imports, same-day body weight and duplicate phone numbers. Browser uploads remain mocked. Analytics focus gating is unchanged.
+
+The owner cleanup utility has 12 tests, including concrete backend races: reserved orphan namespaces and root-checked deletion transactions prevent a stale cleanup from deleting new profiles. Unexpected child collections stop cleanup; disabled/concurrently revoked bindings remain intact. The tool checks the exact deployed rule source, closed enrollment, and ENFORCED App Check before changing reporting data.
+
+Live cutover/publication and acceptance for each phone are recorded below when confirmed. No physical-device acceptance is inferred from automated tests or OTA publication. See [PROFILE_RESET.md](PROFILE_RESET.md) for the ordered rollout and separate phone checklist.
 
 ## App Check consumer API repair - October 28, 2026
 

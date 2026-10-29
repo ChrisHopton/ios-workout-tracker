@@ -1,14 +1,14 @@
 # Private Firestore uploads
 
-Workout saves the journal locally in SQLite and automatically uploads a reporting copy from the private iPhone app. Users do not sign in, paste connection codes, or configure a database. Each new installation obtains an anonymous Firebase Authentication account and a private upload namespace, with an automatic model-plus-short-ID label. The owner administers Firebase on the PC. The app never reads, lists, downloads, or restores cloud history; a new installation starts with an empty local journal.
+Workout saves the journal locally in SQLite and automatically uploads a reporting copy from the private iPhone app. Users complete a required device profile but do not sign in, paste connection codes, or configure a database. The phone number is unverified metadata, never an authorization key. Each new installation obtains an anonymous Firebase Authentication account and a private upload namespace, with an automatic model-plus-short-ID label. The owner administers Firebase on the PC. The app never reads, lists, downloads, or restores cloud history; a new installation starts with an empty local journal.
 
-Uploaded data includes the phone label, optional age/gender/height, dated body-weight measurements, preferred units, exercises, plans, schedule revisions, workout snapshots, and sets. Firebase project configuration and API keys identify the project and may ship with the app. Passwords, refresh tokens, owner OAuth tokens, and Admin SDK credentials must never ship in source, app configuration, or `EXPO_PUBLIC_*` variables. Device credentials stay in native SecureStore.
+Uploaded data includes the phone label, first/last name, phone number, date of birth, gender, optional height, dated body-weight measurements, preferred units, exercises, plans, schedule revisions, workout snapshots, and sets. Firebase project configuration and API keys identify the project and may ship with the app. Passwords, refresh tokens, owner OAuth tokens, and Admin SDK credentials must never ship in source, app configuration, or `EXPO_PUBLIC_*` variables. Device credentials stay in native SecureStore.
 
-Existing installations with saved private-code credentials continue using their original password account, namespace, installation binding, revision clock, pending changes, and frozen retry batch. They do not automatically migrate or re-upload into an anonymous namespace. The former code-entry interface is not required for new installations.
+The profile release deliberately resets existing local/reporting data and retires the legacy password-upload paths. Valid anonymous Auth identities and tokens are retained while upload generation/installation identifiers rotate. New credentials are version 3, enrollment bindings version 3, and record envelopes version 2. The same UID-scoped collection layout is retained. Follow [the coordinated reset rollout](PROFILE_RESET.md); do not deploy the old rules or roll back to old app code afterward.
 
 ## Owner authentication
 
-Use the existing Spark project and default Cloud Firestore Standard edition database in Native mode. Keep billing unattached. Register the native iOS Firebase app with the bundle ID used by the signed app; the public `GoogleService-Info.plist` belongs to that app. Keep the existing Email/Password provider enabled for legacy accounts.
+Use the existing Spark project and default Cloud Firestore Standard edition database in Native mode. Keep billing unattached. Register the native iOS Firebase app with the bundle ID used by the signed app; the public `GoogleService-Info.plist` belongs to that app. Existing Auth identities may remain for owner records; legacy Firestore paths are denied. Do not enable phone authentication or SMS billing for profile numbers.
 
 The owner scripts use `firebase-admin` with Application Default Credentials (ADC) and an explicit project ID. Admin access bypasses client security rules and is confined to owner tooling. Sign in to the pinned Firebase CLI and create the private ADC copy:
 
@@ -61,15 +61,17 @@ npx firebase deploy --only firestore:rules,firestore:indexes --project YOUR_FIRE
 
 The emulator requires a supported JDK and uses only `demo-workout-sync` at `127.0.0.1`. Regular `npm test` skips actual rule evaluation when `FIRESTORE_EMULATOR_HOST` is absent; run `test:rules` explicitly. No real account or database is needed for these tests. Review the deployment project and deploy only the supplied rules/indexes. Never substitute a public or authenticated-user-wide allow rule.
 
-The new rules preserve legacy uploads and deny automatic enrollment unless the owner-only document `uploadControl/automaticEnrollment` contains `enabled: true`. An absent document or false value closes the gate. App users cannot read or edit it. Deploying rules does not open the gate.
+The new rules reject legacy upload paths and old envelope versions, and deny automatic enrollment unless the owner-only document `uploadControl/automaticEnrollment` contains `enabled: true`. An absent document or false value closes the gate. App users cannot read or edit it. Deploying rules does not open the gate.
 
-## Safe rollout order
+## Initial App Check setup (new projects only)
+
+For the existing enforced project, keep enforcement enabled and follow [profile reset rollout](PROFILE_RESET.md) instead. Do not switch it back to monitoring.
 
 Before checking phone metrics, enable monitoring-only mode (UNENFORCED) for Cloud Firestore App Check. An unconfigured service defaults to OFF and collects no verification metrics. Keep automatic enrollment closed during monitoring; only valid production phone evidence, confirmed enforcement and negative-token checks justify opening it. See [enforcement modes](https://firebase.google.com/docs/reference/appcheck/rest/v1/EnforcementMode).
 
 1. Keep automatic enrollment closed. The default absent gate is closed; explicitly close it with `disable-automatic` when updating an already configured project.
 2. Configure the native iOS app, App Attest, and anonymous Authentication. Build and install the new signed binary over existing installations to preserve their local journals.
-3. Verify real App Attest tokens on the installed phones and confirm existing password-backed uploads still use their original namespaces. Automated tests and browser preview do not prove native attestation or Keychain persistence.
+3. Verify real App Attest tokens on the installed phones and confirm the installed app uses the current upload-envelope versions. Automated tests and browser preview do not prove native attestation or Keychain persistence.
 4. Enable **Cloud Firestore App Check enforcement** in Firebase Console only after the installed clients are verified. Wait for enforcement to propagate; Firebase documents a delay of up to 15 minutes. Confirm requests without a valid App Check token are rejected. Older binaries without App Check tokens will stop uploading after enforcement.
 5. Open automatic enrollment with the guarded owner command:
 
@@ -121,7 +123,7 @@ Revocation first sets the automatic root's `enabled` field to false, immediately
 
 Revocation applies to an account/namespace, not permanently to the physical phone. A genuinely fresh installation creates a new anonymous UID and namespace, including when iOS Keychain retains credentials from a prior installation. Fully automatic enrollment accepts that new installation. App Check does not provide a permanent hardware ban. Existing/corrupt/query-failing SQLite state or credential-read failures pause uploads and preserve local data for repair; remote Auth/rules rejection never causes automatic UID rotation.
 
-## Legacy account maintenance
+## Retired legacy account maintenance
 
 Legacy password accounts retain the original paths:
 

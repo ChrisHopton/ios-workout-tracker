@@ -1,3 +1,4 @@
+import { FRESH_START_EPOCH, validateResetIntent, type ResetIntent } from "./reset";
 import type { Connection, JournalDatabase } from "../data/journalStorage";
 import { validateBootstrap, type BootstrapDraft } from "./bootstrap";
 import type { AppData } from "../domain/types";
@@ -56,6 +57,7 @@ export function createSyncJournal(db: JournalDatabase) {
     if (initialized) return;
     await db.withExclusiveTransactionAsync(async (tx) => {
       await tx.execAsync(
+        "CREATE TABLE IF NOT EXISTS upload_reset (id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL); " +
         "CREATE TABLE IF NOT EXISTS upload_bootstrap (id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL); " +
         "CREATE TABLE IF NOT EXISTS upload_state (id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL); " +
         "CREATE TABLE IF NOT EXISTS upload_enrollment (id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL); " +
@@ -64,11 +66,52 @@ export function createSyncJournal(db: JournalDatabase) {
         "CREATE TABLE IF NOT EXISTS upload_inflight (id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL); " +
         "CREATE TABLE IF NOT EXISTS upload_budget (id INTEGER PRIMARY KEY CHECK(id = 1), day TEXT NOT NULL, attempts INTEGER NOT NULL); " +
         "CREATE TABLE IF NOT EXISTS upload_sequence (id INTEGER PRIMARY KEY CHECK(id = 1), counter INTEGER NOT NULL); " +
-        "INSERT OR IGNORE INTO upload_sequence (id, counter) VALUES (1, 0); " +
-        "DROP TABLE IF EXISTS sync_state; DROP TABLE IF EXISTS sync_rows; DROP TABLE IF EXISTS sync_outbox;"
+        "INSERT OR IGNORE INTO upload_sequence (id, counter) VALUES (1, 0);"
       );
     });
     initialized = true;
+  }
+  /** Called inside the journal reset transaction, before any old queue can be exposed. */
+  async function resetForFreshStart(tx: Connection, createId: () => string) {
+    const active = await readState(tx);
+    const staged = await readState(tx, "upload_enrollment");
+    const row = await tx.getFirstAsync<{ value: string }>("SELECT value FROM upload_bootstrap WHERE id = 1");
+    const bootstrap = row ? validateBootstrap(JSON.parse(row.value)) : null;
+    const sources = [active, staged].filter((value): value is SyncLocalState => value !== null).map(validateIdentity);
+    if (!sources.length && !bootstrap) {
+      for (const table of ["upload_records", "upload_outbox", "upload_inflight"]) {
+        const evidence = await tx.getFirstAsync<{ count: number }>("SELECT COUNT(*) AS count FROM " + table);
+        if (!evidence || evidence.count !== 0) throw new Error("Existing upload state needs repair before the fresh start.");
+      }
+      const sequence = await tx.getFirstAsync<{ counter: number }>("SELECT counter FROM upload_sequence WHERE id = 1");
+      if (!sequence || sequence.counter !== 0) throw new Error("Existing upload revisions need repair before the fresh start.");
+    }
+    if (sources.length || bootstrap) {
+      const intent = validateResetIntent({ version: 1, epoch: FRESH_START_EPOCH, sources, bootstrap,
+        target: { deviceId: createId(), generationId: createId(), installationId: createId() } });
+      await tx.runAsync("INSERT INTO upload_reset (id, value) VALUES (1, ?)", JSON.stringify(intent));
+    }
+    // Keep today's attempted-write budget. Rotating a generation must not bypass the quota.
+    await tx.execAsync("DROP TABLE IF EXISTS sync_state; DROP TABLE IF EXISTS sync_rows; DROP TABLE IF EXISTS sync_outbox; DELETE FROM upload_state; DELETE FROM upload_enrollment; DELETE FROM upload_bootstrap; DELETE FROM upload_records; DELETE FROM upload_outbox; DELETE FROM upload_inflight; UPDATE upload_sequence SET counter = 0 WHERE id = 1;");
+  }
+  async function pendingReset(): Promise<ResetIntent | null> {
+    await initialize();
+    const row = await db.getFirstAsync<{ value: string }>("SELECT value FROM upload_reset WHERE id = 1");
+    return row ? validateResetIntent(JSON.parse(row.value)) : null;
+  }
+  async function completeReset(expected: ResetIntent, identity: SyncIdentity, label: string) {
+    await initialize();
+    validateResetIntent(expected);
+    validateIdentity(identity);
+    await db.withExclusiveTransactionAsync(async tx => {
+      const row = await tx.getFirstAsync<{ value: string }>("SELECT value FROM upload_reset WHERE id = 1");
+      if (!row || JSON.stringify(validateResetIntent(JSON.parse(row.value))) !== JSON.stringify(expected) ||
+          identity.layout !== "automatic" || identity.generationId !== expected.target.generationId)
+        throw new Error("The fresh start identity changed. Try again.");
+      await storeState(tx, { ...identity, installationId: expected.target.installationId, label: checkedLabel(label),
+        clock: 0, lastSyncedAt: null, enabled: false, bound: false, initialComplete: false }, "upload_enrollment");
+      await tx.execAsync("DELETE FROM upload_reset;");
+    });
   }
   async function readState(connection: Connection, table = "upload_state", invalid: "reject" | "ignore" = "reject"): Promise<SyncLocalState | null> {
     const row = await connection.getFirstAsync<{ value: string }>(`SELECT value FROM ${table} WHERE id = 1`);
@@ -86,6 +129,7 @@ export function createSyncJournal(db: JournalDatabase) {
   async function prepareBootstrap(candidate: BootstrapDraft): Promise<BootstrapDraft> {
     await initialize();
     validateBootstrap(candidate);
+    if (await pendingReset()) throw new Error("Finish the saved fresh start before enrollment.");
     let result!: BootstrapDraft;
     await db.withExclusiveTransactionAsync(async (tx) => {
       // SQL failures and malformed identities are deliberately not treated as absence.
@@ -279,5 +323,5 @@ export function createSyncJournal(db: JournalDatabase) {
         await db.execAsync("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);").catch(() => undefined);
     }
   }
-  return { initialize, capture, prepareBootstrap, state, pendingEnrollment, prepareEnrollment, activateEnrollment, disconnect, setLabel, pendingCount, inFlight, reserveAttempt, acknowledge };
+  return { initialize, resetForFreshStart, pendingReset, completeReset, capture, prepareBootstrap, state, pendingEnrollment, prepareEnrollment, activateEnrollment, disconnect, setLabel, pendingCount, inFlight, reserveAttempt, acknowledge };
 }

@@ -1,4 +1,6 @@
-import { preserveMigrationBackup } from "./backupIO";
+import * as Crypto from "expo-crypto";
+import type { ResetIntent } from "../sync/reset";
+import { removeRecoveryCopies } from "./backupIO";
 import { openDatabaseAsync } from "expo-sqlite";
 import type { AppData } from "../domain/types";
 import type { BootstrapDraft } from "../sync/bootstrap";
@@ -8,11 +10,13 @@ import { createRetryableResource } from "./retryableResource";
 import { createJournalStorage } from "./journalStorage";
 
 const getStorage = createRetryableResource(async () =>
-  createJournalStorage(await openDatabaseAsync("workout.db"), { beforeMigration: preserveMigrationBackup }),
+  createJournalStorage(await openDatabaseAsync("workout.db"), { createId: () => Crypto.randomUUID(), cleanupRecovery: removeRecoveryCopies }),
 );
 export async function loadData(): Promise<AppData> { return (await getStorage()).load(); }
 export async function writeData(data: AppData): Promise<void> { await (await getStorage()).write(data); }
 export const syncRepository = {
+  pendingReset: async () => (await getStorage()).sync.pendingReset(),
+  completeReset: async (intent: ResetIntent, identity: SyncIdentity, label: string) => (await getStorage()).sync.completeReset(intent, identity, label),
   prepareBootstrap: async (draft: BootstrapDraft) => (await getStorage()).sync.prepareBootstrap(draft),
   state: async () => (await getStorage()).sync.state(),
   pendingEnrollment: async () => (await getStorage()).sync.pendingEnrollment(),

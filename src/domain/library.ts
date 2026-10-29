@@ -1,3 +1,4 @@
+import { emptyProfileSettings } from "./profile";
 import { AppData, Equipment, ExerciseDefinition, MuscleGroup } from "./types";
 const entries: [string, MuscleGroup, Equipment][] = [
   ["Barbell squat", "Legs", "barbell"],
@@ -50,8 +51,8 @@ export const EXERCISE_LIBRARY: ExerciseDefinition[] = entries.map(
 );
 export function initialData(): AppData {
   return {
-    schemaVersion: 2,
-    settings: { age: "", gender: "", heightCm: null, unit: "lb" },
+    schemaVersion: 3,
+    settings: emptyProfileSettings(),
     bodyWeights: [],
     exercises: EXERCISE_LIBRARY.map((e) => ({ ...e })),
     templates: [],

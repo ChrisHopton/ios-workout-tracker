@@ -159,7 +159,7 @@ test("analytics are independent of demographic adjustments and preserve original
   data.sessions = [session(data, "2025-01-13", [set("100", "6")])];
   const original = structuredClone(data);
   const first = summarize(data, 4, "2025-01-20", "kg");
-  const second = summarize({ ...data, settings: { ...data.settings, age: "70", gender: "Female" } }, 4, "2025-01-20", "kg");
+  const second = summarize({ ...data, settings: { ...data.settings, dateOfBirth: "1955-01-20", gender: "Female" } }, 4, "2025-01-20", "kg");
   assert.deepEqual(first, second);
   assert.deepEqual(data, original);
 });

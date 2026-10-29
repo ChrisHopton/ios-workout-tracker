@@ -19,7 +19,7 @@ function legacyFixture(): LegacyAppData {
   const d = oldPlan("d", [4]);
   const manual = oldPlan("manual", []);
   return {
-    schemaVersion: 1, settings: base.settings, exercises: base.exercises,
+    schemaVersion: 1, settings: { age: "35", gender: "male", heightCm: 180, unit: "lb" }, exercises: base.exercises,
     templates: [a, b, c, d, manual],
     scheduleRevisions: [{
       id: "revision-old", effectiveDate: "2025-01-06", anchorMonday: "2025-01-06",
@@ -48,7 +48,7 @@ test("v1 migration preserves each old slot and derives weekly, fortnightly and m
   const original = JSON.stringify(legacy);
   const data = upgradeData(legacy);
   assert.equal(JSON.stringify(legacy), original);
-  assert.equal(data.schemaVersion, 2);
+  assert.equal(data.schemaVersion, 3);
   assert.deepEqual(data.bodyWeights, []);
   assert.deepEqual(data.scheduleRevisions[0].slots.map((slot) => slot.workoutIds), [["a", "a"], [null, null], ["a", "b"], ["c", "d"]]);
   assert.deepEqual(data.templates[0].recurrence, {
@@ -97,7 +97,7 @@ test("recovery serialization validates each schema without upgrading original le
   const current = upgradeData(legacy);
   assert.equal(validateStoredData(current), current);
   assert.equal(serializeStoredBackup(current), serializeBackup(current));
-  assert.throws(() => validateStoredData({ ...current, schemaVersion: 3 }), /schemaVersion/);
+  assert.throws(() => validateStoredData({ ...current, schemaVersion: 4 }), /schemaVersion/);
   assert.throws(() => serializeStoredBackup({ ...legacy, settings: { ...legacy.settings, age: "invalid" } }), /settings.age/);
 });
 
@@ -134,7 +134,7 @@ test("migration validates legacy input before adding fields and retains old data
     assert.equal(JSON.stringify(invalid), before);
   }
   assert.equal(JSON.stringify(legacy), original);
-  assert.throws(() => upgradeData({ ...initialData(), schemaVersion: 3 }), /schemaVersion/);
+  assert.throws(() => upgradeData({ ...initialData(), schemaVersion: 4 }), /schemaVersion/);
 });
 
 test("v2 validation enforces recurrence consistency and required session metadata", () => {

@@ -1,3 +1,4 @@
+import { ageFromDateOfBirth } from "../domain/profile";
 import { useMemo, useState } from "react";
 import { View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
@@ -39,7 +40,8 @@ function ExerciseProgress({ history, data, endDate, referenceGroup, overridden, 
   const unit = data.settings.unit;
   const selectedMetric = effectiveMetric(history.equipment, metric);
   const measurement = useMemo(() => benchmarkMeasurement(data.bodyWeights, endDate), [data.bodyWeights, endDate]);
-  const strengthReference = useMemo(() => strengthBenchmark(history.exerciseId, history.equipment, data.settings.age, referenceGroup, measurement?.weightKg ?? null), [history.exerciseId, history.equipment, data.settings.age, referenceGroup, measurement]);
+  const age = ageFromDateOfBirth(data.settings.dateOfBirth, endDate)?.toString() ?? "";
+  const strengthReference = useMemo(() => strengthBenchmark(history.exerciseId, history.equipment, age, referenceGroup, measurement?.weightKg ?? null), [history.exerciseId, history.equipment, age, referenceGroup, measurement]);
   const chartPoints = selectedMetric === "strength"
     ? history.strengthPoints.map((point) => ({ date: point.date, value: round(point.estimate) }))
     : history.points.map((point) => ({ date: point.date, value: round(selectedMetric === "reps" ? point.reps : point.weight ?? 0) }));

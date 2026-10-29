@@ -23,7 +23,7 @@ const LEGACY: LegacySyncCredentials = {
 
 function anonymous(identity: { deviceId: string; generationId: string }): AnonymousSyncCredentials {
   return {
-    version: 2, layout: "automatic", projectId: PROJECT, apiKey: API_KEY,
+    version: 3, layout: "automatic", projectId: PROJECT, apiKey: API_KEY,
     ...identity, uid: "anonymous_phone", refreshToken: "private-refresh-token",
   };
 }
@@ -205,13 +205,13 @@ test("failed secure storage retries reuse the authenticated result in memory wit
   assert.equal(app.secrets.saved!.uid, "anonymous_phone");
 });
 
-test("a restart resumes saved v2 credentials when enrollment had not yet persisted", async () => {
+test("a restart resumes saved v3 credentials when enrollment had not yet persisted", async () => {
   const app = fixture();
   app.repository.enrollmentError = new Error("SQLite write interrupted");
   await assert.rejects(app.bootstrap(online), /SQLite write interrupted/);
   const saved = structuredClone(app.secrets.saved);
   const draft = structuredClone(app.repository.draft);
-  assert.equal(saved!.version, 2);
+  assert.equal(saved!.version, 3);
   assert.equal(app.repository.staged, null);
 
   app.repository.enrollmentError = null;
@@ -228,7 +228,7 @@ test("a restart resumes saved v2 credentials when enrollment had not yet persist
   assert.equal(app.secrets.saveAttempts, 2);
 });
 
-test("existing legacy active and staged installations bypass automatic signup unchanged", async (t) => {
+test("legacy identities without an explicit reset intent cannot bypass fresh start", async (t) => {
   for (const location of ["active", "staged"] as const) {
     await t.test(location, async () => {
       const app = fixture();
@@ -237,7 +237,7 @@ test("existing legacy active and staged installations bypass automatic signup un
         ? { enabled: false, bound: false, initialComplete: false } : {});
       const before = structuredClone(app.repository[location]);
 
-      assert.equal(await app.bootstrap(offline), true);
+      await assert.rejects(app.bootstrap(offline), /saved upload identity needs attention/);
       assert.deepEqual(app.repository[location], before);
       assert.deepEqual(app.secrets.saved, LEGACY);
       assert.equal(app.repository.draftAttempts, 0);
@@ -326,7 +326,7 @@ test("a fresh local repository can replace stale Keychain credentials from an un
       app.secrets.saved = { ...saved };
       assert.equal(await app.bootstrap(online), true);
       assert.equal(app.signupCalls.length, 1);
-      assert.equal(app.secrets.saved!.version, 2);
+      assert.equal(app.secrets.saved!.version, 3);
       assert.notEqual(app.secrets.saved!.uid, saved.uid);
       assert.notEqual(app.secrets.saved!.deviceId, saved.deviceId);
       assert.notEqual(app.secrets.saved!.generationId, saved.generationId);

@@ -1,11 +1,15 @@
 import { useRef, useState } from "react";
-import { Alert, Pressable, View } from "react-native";
+import { Modal, Pressable, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import Ionicons from "@expo/vector-icons/Ionicons";
 import { useApp } from "../data/store";
 import { formatDate, today } from "../domain/dates";
-import { finishSession, validateSet } from "../domain/sessions";
-import { RecordedSet, WorkoutSession } from "../domain/types";
+import {
+  editSessionSet,
+  finishSession,
+  inspectSessionRecording,
+  RecordingSetPatch,
+} from "../domain/sessions";
+import { WorkoutSession } from "../domain/types";
 import { loadLabel } from "../domain/library";
 import {
   Button,
@@ -23,6 +27,7 @@ export default function RecordWorkout() {
   const t = useTheme();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmMissing, setConfirmMissing] = useState(false);
   const busyRef = useRef(false);
   const session = data.sessions.find((s) => s.id === id);
   if (!session)
@@ -42,7 +47,7 @@ export default function RecordWorkout() {
       ),
     }));
   }
-  function editSet(ei: number, si: number, patch: Partial<RecordedSet>) {
+  function editSet(ei: number, si: number, patch: RecordingSetPatch) {
     if (busyRef.current) return;
     if (
       patch.weight !== undefined &&
@@ -59,21 +64,7 @@ export default function RecordWorkout() {
     )
       return;
     try {
-      change((s) => ({
-        ...s,
-        status: "in_progress",
-        finishedAt: null,
-        exercises: s.exercises.map((e, i) =>
-          i !== ei
-            ? e
-            : {
-                ...e,
-                sets: e.sets.map((set, j) =>
-                  j !== si ? set : { ...set, ...patch },
-                ),
-              },
-        ),
-      }));
+      change((s) => editSessionSet(s, ei, si, patch));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to edit set.");
     }
@@ -112,29 +103,37 @@ export default function RecordWorkout() {
     }
   }
   function finishPressed() {
-    const missing = session!.exercises.reduce(
-      (n, e) => n + e.sets.filter((s) => s.status === "pending").length,
-      0,
-    );
-    if (missing) {
-      Alert.alert(
-        "Finish with missing sets?",
-        missing +
-          " unfinished sets will be marked skipped. They will not count toward your analytics.",
-        [
-          { text: "Keep recording", style: "cancel" },
-          { text: "Skip & finish", onPress: () => void finish(true) },
-        ],
-      );
+    if (busyRef.current) return;
+    const recording = inspectSessionRecording(session!);
+    const message =
+      recording.error ??
+      (!recording.completedSets
+        ? "Complete at least one set before finishing your workout."
+        : null);
+    if (message) {
+      setError(message);
+      return;
+    }
+    setError("");
+    if (recording.missingSets) {
+      setConfirmMissing(true);
     } else void finish(false);
   }
-  const done = session.exercises.reduce(
-    (n, e) => n + e.sets.filter((s) => s.status === "completed").length,
-    0,
-  );
+  const { completedSets: done } = inspectSessionRecording(session);
   const total = session.exercises.reduce((n, e) => n + e.sets.length, 0);
   return (
     <Screen>
+      <Modal visible={confirmMissing} transparent animationType="fade"
+        onRequestClose={() => setConfirmMissing(false)}>
+        <View style={{ flex: 1, justifyContent: "center", backgroundColor: "#00000080", padding: 24 }}>
+          <View accessibilityViewIsModal style={{ backgroundColor: t.card, borderRadius: 20, padding: 20, gap: 16, maxWidth: 480, width: "100%", alignSelf: "center" }}>
+            <Txt bold style={{ fontSize: 20 }}>Skip missing sets and finish?</Txt>
+            <Txt muted>Missing sets will be marked skipped and excluded from your analytics.</Txt>
+            <Button title="Keep recording" secondary onPress={() => setConfirmMissing(false)} />
+            <Button title="Skip and finish" disabled={busy} onPress={() => { setConfirmMissing(false); void finish(true); }} />
+          </View>
+        </View>
+      </Modal>
       <Txt muted>
         {formatDate(session.date, {
           weekday: "long",
@@ -166,7 +165,9 @@ export default function RecordWorkout() {
           </Txt>
         </Card>
       )}
-      {!!error && <Txt style={{ color: t.danger }}>{error}</Txt>}
+      {!!error && <View accessibilityRole="alert" accessibilityLiveRegion="polite">
+        <Txt style={{ color: t.danger }}>{error}</Txt>
+      </View>}
       {session.exercises.map((e, ei) => (
         <Card key={e.exercise.id}>
           <View style={{ gap: 4 }}>
@@ -207,9 +208,6 @@ export default function RecordWorkout() {
             </Txt>
             <Txt muted style={{ flex: 1, fontSize: 11 }}>
               REPS
-            </Txt>
-            <Txt muted style={{ width: 44, fontSize: 11, textAlign: "center" }}>
-              DONE
             </Txt>
           </Row>
           {e.sets.map((set, si) => (
@@ -252,7 +250,6 @@ export default function RecordWorkout() {
                       onChangeText={(value) =>
                         editSet(ei, si, {
                           weight: value.replace(",", "."),
-                          status: "pending",
                         })
                       }
                     />
@@ -268,62 +265,14 @@ export default function RecordWorkout() {
                     keyboardType="number-pad"
                     placeholder={e.target.repMin + "–" + e.target.repMax}
                     onChangeText={(value) =>
-                      editSet(ei, si, { reps: value, status: "pending" })
+                      editSet(ei, si, { reps: value })
                     }
                   />
                 </View>
-                <Pressable
-                  accessibilityRole="checkbox"
-                  accessibilityLabel={
-                    "Complete " + e.exercise.name + " set " + (si + 1)
-                  }
-                  accessibilityState={{
-                    checked: set.status === "completed",
-                    disabled: future || busy,
-                  }}
-                  disabled={future || busy}
-                  onPress={() => {
-                    if (set.status === "completed") {
-                      editSet(ei, si, { status: "pending" });
-                      return;
-                    }
-                    const message = validateSet(set, e.exercise.equipment);
-                    if (message) {
-                      setError(
-                        e.exercise.name + " set " + (si + 1) + ": " + message,
-                      );
-                      Alert.alert("Check this set", message);
-                      return;
-                    }
-                    editSet(ei, si, { status: "completed" });
-                  }}
-                  style={{
-                    width: 44,
-                    height: 48,
-                    borderRadius: 12,
-                    justifyContent: "center",
-                    alignItems: "center",
-                    backgroundColor:
-                      set.status === "completed" ? t.success : t.bg,
-                    borderWidth: 1,
-                    borderColor:
-                      set.status === "completed" ? t.success : t.border,
-                  }}
-                >
-                  <Ionicons
-                    name={
-                      set.status === "completed"
-                        ? "checkmark"
-                        : "ellipse-outline"
-                    }
-                    size={22}
-                    color={set.status === "completed" ? t.onAccent : t.muted}
-                  />
-                </Pressable>
               </Row>
               {set.status === "skipped" ? (
                 <Txt muted style={{ fontSize: 12 }}>
-                  Skipped · enter a value to record this set.
+                  Skipped · change {e.exercise.equipment === "bodyweight" ? "reps" : "weight or reps"} to record this set.
                 </Txt>
               ) : (
                 e.exercise.equipment !== "bodyweight" &&
@@ -344,7 +293,6 @@ export default function RecordWorkout() {
                     onPress={() =>
                       editSet(ei, si, {
                         weight: String(e.suggestion.weights[si]),
-                        status: "pending",
                       })
                     }
                     style={{

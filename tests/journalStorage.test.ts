@@ -1,3 +1,4 @@
+import { initialData } from "../src/domain/library";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createJournalStorage } from "../src/data/journalStorage";
@@ -34,7 +35,7 @@ test("one set edit writes one small record even with a thousand workouts", async
   }
 });
 
-test("version one journals migrate atomically and release the old copy", async () => {
+test("version one journals reset atomically and release the old copy", async () => {
   const sql = sqliteHarness();
   try {
     const data = historyFixture(2);
@@ -45,7 +46,7 @@ test("version one journals migrate atomically and release the old copy", async (
       .prepare("INSERT INTO app_state VALUES (1, ?)")
       .run(JSON.stringify(data));
     const migrated = await createJournalStorage(sql.db).load();
-    assert.deepEqual(migrated, data);
+    assert.deepEqual(migrated, initialData());
     assert.equal(
       sql.native
         .prepare("SELECT name FROM sqlite_master WHERE name = 'app_state'")
@@ -54,9 +55,9 @@ test("version one journals migrate atomically and release the old copy", async (
     );
     assert.equal(
       sql.native.prepare("PRAGMA user_version").get()?.user_version,
-      5,
+      6,
     );
-    assert.deepEqual(await createJournalStorage(sql.db).load(), data);
+    assert.deepEqual(await createJournalStorage(sql.db).load(), initialData());
   } finally {
     sql.close();
   }
@@ -84,7 +85,7 @@ test("failed migration rolls back and can be retried without losing the original
         ?.count,
       0,
     );
-    assert.deepEqual(await store.load(), data);
+    assert.deepEqual(await store.load(), initialData());
   } finally {
     sql.close();
   }
@@ -192,7 +193,7 @@ test("migration commit failure restores the legacy table and version before retr
         ?.count,
       0,
     );
-    assert.deepEqual(await store.load(), data);
+    assert.deepEqual(await store.load(), initialData());
   } finally {
     sql.close();
   }

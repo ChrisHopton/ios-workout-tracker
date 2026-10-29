@@ -1,8 +1,7 @@
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
-import type { AppData } from "../domain/types";
-import { validateStoredData, serializeStoredBackup, MAX_BACKUP_BYTES, type LegacyAppData } from "../domain/backup";
+import { validateStoredData, serializeStoredBackup, MAX_BACKUP_BYTES, type StoredAppData } from "../domain/backup";
 export async function exportFile(text: string): Promise<void> {
   if (!(await Sharing.isAvailableAsync()))
     throw new Error("File sharing is unavailable on this device.");
@@ -41,7 +40,7 @@ export async function importFile(): Promise<string | null> {
   }
 }
 
-export async function preserveMigrationBackup(data: AppData | LegacyAppData, fromVersion: number, toVersion: number): Promise<void> {
+export async function preserveMigrationBackup(data: StoredAppData, fromVersion: number, toVersion: number): Promise<void> {
   const name = `workout-before-v${fromVersion}-to-v${toVersion}`;
   const backup = new File(Paths.document, name + ".json");
   if (backup.exists) { validateStoredData(JSON.parse(await backup.text())); return; }
@@ -64,4 +63,13 @@ export async function exportMigrationBackup(): Promise<void> {
   const text = await backup.text();
   validateStoredData(JSON.parse(text));
   await exportFile(text);
+}
+
+/** Deliberate fresh-start cleanup, retried until the SQLite lifecycle marker records success. */
+export async function removeRecoveryCopies(): Promise<void> {
+  for (const directory of [Paths.document, Paths.cache]) {
+    for (const entry of directory.list()) {
+      if (entry instanceof File && /^(?:workout-before-(?:v\d+-to-v\d+|firestore)\.(?:json|tmp)|workout-backup-.*\.json)$/.test(entry.name)) entry.delete();
+    }
+  }
 }

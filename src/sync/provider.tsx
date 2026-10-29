@@ -12,6 +12,7 @@ import { useApp } from "../data/store";
 import { syncRepository } from "../data/persistence";
 import { SyncController } from "./controller";
 import {
+  migrateResetCredentials,
   loadCredentials,
   saveCredentials,
   removeCredentials,
@@ -26,7 +27,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const previous = useRef(data);
   const [runtime] = useState(createUploadRuntime);
   const [bootstrap] = useState(() => createAutomaticBootstrap(syncRepository, {
-    load: loadCredentials, save: saveCredentials, remove: removeCredentials,
+    load: loadCredentials, save: saveCredentials, remove: removeCredentials, migrateReset: migrateResetCredentials,
   }, { ...runtime, createId: () => Crypto.randomUUID() }));
   const [controller] = useState(
     () =>

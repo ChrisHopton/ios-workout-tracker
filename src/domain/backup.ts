@@ -1,13 +1,18 @@
 import { AppData, EQUIPMENT, MUSCLE_GROUPS, WorkoutRecurrence, WorkoutSession, WorkoutTemplate } from "./types";
 import { addDays } from "./dates";
 import { templateOccursOn } from "./schedule";
+import { ageFromDateOfBirth, emptyProfileSettings, normalizePhone, validateProfileDraft } from "./profile";
+
+export type LegacyProfileSettings = { age: string; gender: string; heightCm: number | null; unit: AppData["settings"]["unit"] };
+export type LegacyV2AppData = Omit<AppData, "schemaVersion" | "settings"> & { schemaVersion: 2; settings: LegacyProfileSettings };
+export type StoredAppData = AppData | LegacyV2AppData | LegacyAppData;
 
 export type LegacyTemplate = Omit<WorkoutTemplate, "recurrence">;
 type LegacySessionExercise = Omit<WorkoutSession["exercises"][number], "sets" | "suggestion"> & {
   sets: Omit<WorkoutSession["exercises"][number]["sets"][number], "classification">[];
   suggestion: Omit<WorkoutSession["exercises"][number]["suggestion"], "algorithmVersion">;
 };
-export type LegacyAppData = Omit<AppData, "schemaVersion" | "bodyWeights" | "templates" | "scheduleRevisions" | "sessions"> & {
+export type LegacyAppData = Omit<LegacyV2AppData, "schemaVersion" | "bodyWeights" | "templates" | "scheduleRevisions" | "sessions"> & {
   schemaVersion: 1;
   templates: LegacyTemplate[];
   scheduleRevisions: {
@@ -147,7 +152,7 @@ function target(value: unknown, path: string): ObjectValue {
 function templates(
   value: unknown,
   path: string,
-  version: 1 | 2,
+  version: 1 | 2 | 3,
   exerciseIds?: Set<unknown>,
 ): WorkoutTemplate[] {
   const items = array(value, path, 1000).map((value, index) => {
@@ -159,7 +164,7 @@ function templates(
       "weekdays",
       "archived",
       "updatedAt",
-      ...(version === 2 ? ["recurrence"] : []),
+      ...(version >= 2 ? ["recurrence"] : []),
     ]);
     string(item.id, `${at}.id`, 100);
     string(item.title, `${at}.title`, 120);
@@ -171,7 +176,7 @@ function templates(
       number(day, `${at}.weekdays[${index}]`, 0, 6, true),
     );
     unique(days, `${at}.weekdays`);
-    if (version === 2) {
+    if (version >= 2) {
       const raw = item.recurrence as ObjectValue | null;
       const kind = raw && choice(raw.kind, `${at}.recurrence.kind`, ["weekly", "biweekly", "legacy"]);
       const recurrence = object(raw, `${at}.recurrence`, kind === "weekly"
@@ -225,7 +230,7 @@ function templates(
         .length > 2
     )
       fail(path, `assigns more than two active workouts to weekday ${day}`);
-  if (version === 2) {
+  if (version >= 2) {
     for (let offset = 0; offset < 14; offset++) {
       const date = addDays("2000-01-03", offset);
       if (items.filter((item) => templateOccursOn(item, date)).length > 1)
@@ -242,7 +247,7 @@ function draft(value: unknown, path: string, reps: boolean): string {
     fail(path, "exceeds the supported range");
   return result;
 }
-function validateVersion(value: unknown, version: 1 | 2, previous?: AppData): ObjectValue {
+function validateVersion(value: unknown, version: 1 | 2 | 3, previous?: AppData): ObjectValue {
   const data = object(value, "backup", [
     "schemaVersion",
     "settings",
@@ -250,27 +255,45 @@ function validateVersion(value: unknown, version: 1 | 2, previous?: AppData): Ob
     "templates",
     "scheduleRevisions",
     "sessions",
-    ...(version === 2 ? ["bodyWeights"] : []),
+    ...(version >= 2 ? ["bodyWeights"] : []),
   ]);
   if (data.schemaVersion !== version)
     fail("schemaVersion", `must be ${version}; this backup may need a newer app`);
-  const settings = object(data.settings, "settings", [
-    "age",
-    "gender",
-    "heightCm",
-    "unit",
-  ]);
-  const age = string(settings.age, "settings.age", 3, true);
-  if (
-    age !== "" &&
-    (!/^\d+$/.test(age) || Number(age) < 1 || Number(age) > 130)
-  )
-    fail("settings.age", "must be empty or an age from 1 to 130");
-  string(settings.gender, "settings.gender", 80, true);
+  const settings = object(data.settings, "settings", version === 3 ? [
+    "phoneCountryCode", "phoneNumber", "firstName", "lastName", "dateOfBirth",
+    "gender", "heightCm", "unit", "profileCompletedAt",
+  ] : ["age", "gender", "heightCm", "unit"]);
+  if (version === 3) {
+    const country = string(settings.phoneCountryCode, "settings.phoneCountryCode", 4);
+    if (!/^\+[1-9]\d{0,2}$/.test(country))
+      fail("settings.phoneCountryCode", "must be an international country code such as +1");
+    const phone = string(settings.phoneNumber, "settings.phoneNumber", 16, true);
+    if (phone) {
+      try {
+        if (normalizePhone(country, phone).phoneNumber !== phone) throw new Error();
+      } catch { fail("settings.phoneNumber", "must be a canonical international phone number matching its country code"); }
+    }
+    string(settings.firstName, "settings.firstName", 100, true);
+    string(settings.lastName, "settings.lastName", 100, true);
+    const birth = string(settings.dateOfBirth, "settings.dateOfBirth", 10, true);
+    if (birth && ageFromDateOfBirth(birth) === null)
+      fail("settings.dateOfBirth", "must be a real past or present YYYY-MM-DD date (age 0–130)");
+    choice(settings.gender, "settings.gender", ["", "Male", "Female"]);
+    if (settings.profileCompletedAt !== null) {
+      timestamp(settings.profileCompletedAt, "settings.profileCompletedAt");
+      try { validateProfileDraft(settings as unknown as AppData["settings"]); }
+      catch { fail("settings.profileCompletedAt", "requires a valid phone, first and last name, date of birth, and gender"); }
+    }
+  } else {
+    const age = string(settings.age, "settings.age", 3, true);
+    if (age !== "" && (!/^\d+$/.test(age) || Number(age) < 1 || Number(age) > 130))
+      fail("settings.age", "must be empty or an age from 1 to 130");
+    string(settings.gender, "settings.gender", 80, true);
+  }
   if (settings.heightCm !== null)
     number(settings.heightCm, "settings.heightCm", 1, 300);
   choice(settings.unit, "settings.unit", ["lb", "kg"]);
-  if (version === 2) {
+  if (version >= 2) {
     const weights = array(data.bodyWeights, "bodyWeights", 20000).map((value, index) => {
       const at = `bodyWeights[${index}]`;
       const entry = object(value, at, ["id", "date", "weightKg", "updatedAt"]);
@@ -322,9 +345,9 @@ function validateVersion(value: unknown, version: 1 | 2, previous?: AppData): Ob
       const slotAt = `${at}.slots[${index}]`;
       const slot = object(value, slotAt, ["weekday", "workoutIds"]);
       number(slot.weekday, `${slotAt}.weekday`, 0, 6, true);
-      const ids = array(slot.workoutIds, `${slotAt}.workoutIds`, 2, version === 2 ? 2 : 0);
+      const ids = array(slot.workoutIds, `${slotAt}.workoutIds`, 2, version >= 2 ? 2 : 0);
       ids.forEach((id, index) => {
-        if (version === 2 && id === null) return;
+        if (version >= 2 && id === null) return;
         string(id, `${slotAt}.workoutIds[${index}]`, 100);
         const workout = snapshots.find((template) => template.id === id);
         if (
@@ -344,7 +367,7 @@ function validateVersion(value: unknown, version: 1 | 2, previous?: AppData): Ob
       slots.map((slot) => slot.weekday),
       `${at}.slots.weekday`,
     );
-    if (version === 2) {
+    if (version >= 2) {
       for (let offset = 0; offset < 14; offset++) {
         const day = offset % 7;
         const expected = snapshots.find((snapshot) => templateOccursOn(snapshot, addDays(anchor, offset)))?.id ?? null;
@@ -428,9 +451,9 @@ function validateVersion(value: unknown, version: 1 | 2, previous?: AppData): Ob
           const suggestion = object(entry.suggestion, `${entryAt}.suggestion`, [
             "weights",
             "reason",
-            ...(version === 2 ? ["algorithmVersion"] : []),
+            ...(version >= 2 ? ["algorithmVersion"] : []),
           ]);
-          if (version === 2 && suggestion.algorithmVersion !== 1 && suggestion.algorithmVersion !== 2)
+          if (version >= 2 && suggestion.algorithmVersion !== 1 && suggestion.algorithmVersion !== 2)
             fail(`${entryAt}.suggestion.algorithmVersion`, "must be 1 or 2");
           string(suggestion.reason, `${entryAt}.suggestion.reason`, 2000);
           const weights = array(
@@ -463,8 +486,8 @@ function validateVersion(value: unknown, version: 1 | 2, previous?: AppData): Ob
             prescription.sets as number,
           ).forEach((value, index) => {
             const setAt = `${entryAt}.sets[${index}]`;
-            const set = object(value, setAt, ["weight", "reps", "status", ...(version === 2 ? ["classification"] : [])]);
-            if (version === 2) choice(set.classification, `${setAt}.classification`, ["working", "warmup"]);
+            const set = object(value, setAt, ["weight", "reps", "status", ...(version >= 2 ? ["classification"] : [])]);
+            if (version >= 2) choice(set.classification, `${setAt}.classification`, ["working", "warmup"]);
             const weight = draft(set.weight, `${setAt}.weight`, false);
             const reps = draft(set.reps, `${setAt}.reps`, true);
             choice(set.status, `${setAt}.status`, [
@@ -529,19 +552,20 @@ function validateVersion(value: unknown, version: 1 | 2, previous?: AppData): Ob
 }
 
 export function validateData(value: unknown, previous?: AppData): AppData {
-  return validateVersion(value, 2, previous) as unknown as AppData;
+  return validateVersion(value, 3, previous) as unknown as AppData;
 }
 
 export function validateLegacyData(value: unknown): LegacyAppData {
   return validateVersion(value, 1) as unknown as LegacyAppData;
 }
 
-export function validateStoredData(value: unknown): LegacyAppData | AppData {
+export function validateStoredData(value: unknown): StoredAppData {
   if (value && typeof value === "object") {
     if ((value as ObjectValue).schemaVersion === 1) return validateLegacyData(value);
-    if ((value as ObjectValue).schemaVersion === 2) return validateData(value);
+    if ((value as ObjectValue).schemaVersion === 2) return validateVersion(value, 2) as unknown as LegacyV2AppData;
+    if ((value as ObjectValue).schemaVersion === 3) return validateData(value);
   }
-  return fail("schemaVersion", "must be 1 or 2; this backup may need a newer app");
+  return fail("schemaVersion", "must be 1, 2, or 3; this backup may need a newer app");
 }
 
 function upgradedTemplate(template: LegacyTemplate, anchorMonday: string, slots: { weekday: number; workoutIds: string[] }[]): WorkoutTemplate {
@@ -562,9 +586,21 @@ function upgradedTemplate(template: LegacyTemplate, anchorMonday: string, slots:
   return { ...template, weekdays: [...template.weekdays], exercises: template.exercises.map((entry) => ({ ...entry })), recurrence };
 }
 
+function upgradeV2Data(data: LegacyV2AppData): AppData {
+  const normalizedGender = data.settings.gender.trim().toLowerCase();
+  return validateData({
+    ...data, schemaVersion: 3,
+    settings: {
+      ...emptyProfileSettings(), heightCm: data.settings.heightCm, unit: data.settings.unit,
+      gender: normalizedGender === "male" ? "Male" : normalizedGender === "female" ? "Female" : "",
+    },
+  });
+}
+
 export function upgradeData(value: unknown): AppData {
   const legacy = validateStoredData(value);
-  if (legacy.schemaVersion === 2) return legacy;
+  if (legacy.schemaVersion === 3) return legacy;
+  if (legacy.schemaVersion === 2) return upgradeV2Data(legacy);
   const latest = [...legacy.scheduleRevisions].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
   const anchorMonday = latest?.anchorMonday ?? "2000-01-03";
   const currentSlots = Array.from({ length: 7 }, (_, weekday) => {
@@ -572,7 +608,7 @@ export function upgradeData(value: unknown): AppData {
     const existing = latest?.slots.find((slot) => slot.weekday === weekday)?.workoutIds ?? [];
     return { weekday, workoutIds: [...existing.filter((id) => assigned.includes(id)), ...assigned.filter((id) => !existing.includes(id))] };
   });
-  const upgraded: AppData = {
+  const upgraded: LegacyV2AppData = {
     ...legacy,
     schemaVersion: 2,
     settings: { ...legacy.settings },
@@ -604,7 +640,7 @@ export function upgradeData(value: unknown): AppData {
       })),
     })),
   };
-  return validateData(upgraded);
+  return upgradeV2Data(upgraded);
 }
 function byteLength(text: string): number {
   // Count UTF8 bytes without adding a native dependency
@@ -654,7 +690,7 @@ export function serializeBackup(data: AppData): string {
   return text;
 }
 
-export function serializeStoredBackup(data: LegacyAppData | AppData): string {
+export function serializeStoredBackup(data: StoredAppData): string {
   validateStoredData(data);
   return JSON.stringify(data);
 }

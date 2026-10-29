@@ -84,8 +84,8 @@ export function makeCommitBody(request: SyncRequest, credentials: SyncCredential
         update: {
           name: documentRoot(checked),
           fields: {
-            schemaVersion: { integerValue: checked.version === 2 ? "2" : "1" },
-            ...(checked.version === 2 ? { enabled: { booleanValue: true } } : {}),
+            schemaVersion: { integerValue: checked.version === 3 ? "3" : checked.version === 2 ? "2" : "1" },
+            ...(checked.version !== 1 ? { enabled: { booleanValue: true } } : {}),
             deviceId: { stringValue: checked.deviceId },
             generationId: { stringValue: checked.generationId },
             installationId: { stringValue: request.installationId },
@@ -224,9 +224,10 @@ export function createSyncTransport(
     return new SyncError(automatic ? "Cloud authorization was revoked or rejected. Your changes remain saved on this phone." : REJECTED, false, "auth");
   }
   async function authenticate(credentials: SyncCredentials, key: string): Promise<Session> {
+    if (credentials.version !== 3) throw new SyncError("Complete the fresh start before uploading.", false, "auth");
     let refreshToken: string | null;
     try { refreshToken = sessions.get(key)?.refreshToken ?? await options.loadRefreshToken?.(credentials) ??
-      (credentials.version === 2 ? credentials.refreshToken : null); } catch {
+      credentials.refreshToken; } catch {
       throw new SyncError("Saved cloud authorization could not be read. Try again.", true, "storage");
     }
     if (refreshToken !== null && !opaque(refreshToken)) throw new SyncError(INVALID, false, "invalid");
@@ -241,23 +242,11 @@ export function createSyncTransport(
         },
       );
       if (response.status === 200) return authSession(response.value, credentials, true, now());
-      const code = record(response.value) && record(response.value.error) ? response.value.error.message : null;
-      if (credentials.version === 2 || (code !== "INVALID_REFRESH_TOKEN" && code !== "TOKEN_EXPIRED")) {
-        throw failure(response.status, response.value, true, credentials.version === 2);
-      }
+      throw failure(response.status, response.value, true, true);
     }
-    if (credentials.version === 2) throw new SyncError("Cloud authorization is unavailable. Your changes remain saved on this phone.", false, "auth");
-    response = await json(
-      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(credentials.apiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: credentials.email, password: credentials.password, returnSecureToken: true }),
-      },
-    );
-    if (response.status !== 200) throw failure(response.status, response.value, true);
-    return authSession(response.value, credentials, false, now());
+    throw new SyncError("Cloud authorization is unavailable. Your changes remain saved on this phone.", false, "auth");
   }
+
   async function authorization(credentials: SyncCredentials): Promise<{ session: Session; cached: boolean; key: string }> {
     const key = JSON.stringify(credentials);
     let session = sessions.get(key);
@@ -287,6 +276,7 @@ export function createSyncTransport(
     }
     const body = makeCommitBody(request, credentials);
     const checked = validateCredentials(credentials);
+    if (checked.version !== 3) throw new SyncError("Complete the fresh start before uploading.", false, "auth");
     if (!canSend()) throw new SyncError("Cloud upload paused while the app is closed.", true);
     const credentialKey = JSON.stringify(checked);
     const forceRefresh = forceAttestation.has(credentialKey);
@@ -338,13 +328,13 @@ export function createSyncTransport(
       auth.session.expiresAt = 0;
       throw new SyncError("Cloud authorization is being renewed. Try again.", true);
     }
-    if (checked.version === 2 && request.action === "bind" && response.status === 403 &&
+    if (checked.version === 3 && request.action === "bind" && response.status === 403 &&
       responseError?.status === "PERMISSION_DENIED") {
       // A closed rollout gate can deny a new binding. Keep retrying this same saved UID;
       // authentication failures above and denials of already-bound uploads remain terminal.
       throw new SyncError("Automatic uploads are waiting for authorization. Your workouts are saved locally.", true, "enrollment");
     }
-    if (response.status !== 200) throw failure(response.status, response.value, false, checked.version === 2);
+    if (response.status !== 200) throw failure(response.status, response.value, false, checked.version === 3);
     return commitReceipt(response.value, request);
   };
 }
@@ -363,7 +353,7 @@ export async function createAnonymousCredentials(
   let pending: AnonymousSyncCredentials;
   try {
     pending = validateCredentials({
-      version: 2, layout: "automatic", projectId: config.projectId, apiKey: config.apiKey,
+      version: 3, layout: "automatic", projectId: config.projectId, apiKey: config.apiKey,
       deviceId: identity.deviceId, generationId: identity.generationId, uid: "pending", refreshToken: "pending",
     }) as AnonymousSyncCredentials;
   } catch {
@@ -393,7 +383,7 @@ export async function createAnonymousCredentials(
     const credentials = validateCredentials({
       ...pending, uid: response.value.localId, refreshToken: response.value.refreshToken,
     });
-    if (credentials.version !== 2) throw new Error();
+    if (credentials.version !== 3) throw new Error();
     authSession(response.value, credentials, false, (options.now ?? Date.now)());
     return credentials;
   } catch {

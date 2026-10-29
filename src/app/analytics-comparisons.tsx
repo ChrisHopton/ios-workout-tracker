@@ -1,3 +1,4 @@
+import { ageFromDateOfBirth } from "../domain/profile";
 import { useMemo } from "react";
 import { BodyWeightComparison } from "../components/BenchmarkComparison";
 import { Screen, Txt } from "../components/ui";
@@ -7,7 +8,7 @@ import { benchmarkMeasurement, bodyWeightBenchmark } from "../domain/benchmarks"
 export default function AnalyticsComparisons() {
   const { data, result, referenceGroup, referenceOverride, setReferenceOverride } = useAnalytics();
   const comparison = useMemo(() => data && result ? {
-    body: bodyWeightBenchmark(data.settings, referenceGroup),
+    body: bodyWeightBenchmark({ age: ageFromDateOfBirth(data.settings.dateOfBirth, result.endDate)?.toString() ?? "", heightCm: data.settings.heightCm }, referenceGroup),
     measurement: benchmarkMeasurement(data.bodyWeights, result.endDate),
   } : null, [data, result, referenceGroup]);
   if (!data || !comparison) return <Screen><Txt muted>Loading comparisons…</Txt></Screen>;

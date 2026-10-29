@@ -885,7 +885,7 @@ test("revoked staged automatic credentials stop after one authentication attempt
     }) as typeof fetch);
     const app = setup(transport);
     const credentials: SyncCredentials = {
-      version: 2, layout: "automatic", projectId: CREDENTIALS.projectId, apiKey: CREDENTIALS.apiKey,
+      version: 3, layout: "automatic", projectId: CREDENTIALS.projectId, apiKey: CREDENTIALS.apiKey,
       deviceId: DEVICE, generationId: GENERATION, uid: "staged_anonymous", refreshToken: "saved-refresh-secret",
     };
     app.repository.staged = {
@@ -929,7 +929,7 @@ test("temporary automatic enrollment denial retries the same staged identity and
   };
   app.repository.local = null;
   app.secrets.saved = {
-    version: 2, layout: "automatic", projectId: CREDENTIALS.projectId, apiKey: CREDENTIALS.apiKey,
+    version: 3, layout: "automatic", projectId: CREDENTIALS.projectId, apiKey: CREDENTIALS.apiKey,
     deviceId: DEVICE, generationId: GENERATION, uid: "staged_anonymous", refreshToken: "saved-refresh-secret",
   };
   const credentials = structuredClone(app.secrets.saved);

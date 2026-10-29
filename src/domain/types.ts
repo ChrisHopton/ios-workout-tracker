@@ -19,8 +19,13 @@ export const EQUIPMENT = [
 export type Equipment = (typeof EQUIPMENT)[number];
 export type Unit = "lb" | "kg";
 export interface ProfileSettings {
-  age: string;
-  gender: string;
+  phoneCountryCode: string;
+  phoneNumber: string;
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+  gender: "" | "Male" | "Female";
+  profileCompletedAt: string | null;
   heightCm: number | null;
   unit: Unit;
 }
@@ -103,7 +108,7 @@ export interface WorkoutSession {
   exercises: SessionExercise[];
 }
 export interface AppData {
-  schemaVersion: 2;
+  schemaVersion: 3;
   settings: ProfileSettings;
   bodyWeights: BodyWeightEntry[];
   exercises: ExerciseDefinition[];

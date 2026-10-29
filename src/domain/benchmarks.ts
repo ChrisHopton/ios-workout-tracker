@@ -2,7 +2,7 @@ import bodyTable from "../data/benchmarks/body-weight.json";
 import strengthTable from "../data/benchmarks/strength.json";
 import { dayDifference } from "./dates";
 import { latestBodyWeight } from "./bodyWeight";
-import { BodyWeightEntry, Equipment, ProfileSettings } from "./types";
+import { BodyWeightEntry, Equipment } from "./types";
 
 export type ReferenceGroup = "female" | "male";
 export interface Cohort {
@@ -44,13 +44,13 @@ function matches(row: Cohort, group: ReferenceGroup, age: number, size: number, 
     && row.lower === Math.floor(size / width) * width && row.upper === row.lower + width;
 }
 export function bodyWeightBenchmark(
-  profile: Pick<ProfileSettings, "age" | "heightCm">,
+  profile: { age: string; heightCm: number | null },
   group: ReferenceGroup | null,
   rows: readonly BodyCohort[] = bodyTable.cohorts,
 ): Benchmark {
   if (!group) return { available: false, reason: "Choose a reference group in Comparison details." };
   const age = profileAge(profile.age);
-  if (age === null || profile.heightCm === null) return { available: false, reason: "Add age and height in Settings to compare." };
+  if (age === null || profile.heightCm === null) return { available: false, reason: "Add date of birth and height in Settings to compare." };
   if (age < 20 || !Number.isFinite(profile.heightCm) || profile.heightCm <= 0) return insufficient;
   for (const width of [10, 20]) {
     const row = rows.find((entry) => matches(entry, group, age, profile.heightCm!, width));
@@ -73,7 +73,7 @@ export function strengthBenchmark(
   if (!supportsStrengthBenchmark(exerciseId, equipment)) return { available: false, reason: "No matching benchmark for this exercise and equipment." };
   if (!group) return { available: false, reason: "Choose a reference group in Comparison details." };
   const age = profileAge(ageText);
-  if (age === null || weightKg === null) return { available: false, reason: "Add age and body weight in Settings to compare." };
+  if (age === null || weightKg === null) return { available: false, reason: "Add date of birth and body weight in Settings to compare." };
   if (age < 18 || !Number.isFinite(weightKg) || weightKg <= 0) return insufficient;
   const field = liftFields[exerciseId as keyof typeof liftFields];
   for (const width of [10, 20]) {

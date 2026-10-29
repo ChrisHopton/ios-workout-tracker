@@ -16,7 +16,8 @@ import {
 import { SyncSettings } from "../../components/SyncSettings";
 import { BodyWeightSettings } from "../../components/BodyWeightSettings";
 import { SaveIndicator } from "../../components/SaveIndicator";
-import { GenderSelector } from "../../components/GenderSelector";
+import { PhoneFields, PersonalProfileFields } from "../../components/ProfileFields";
+import { editProfile, profileDraft, ProfileDraft } from "../../domain/profile";
 import { InlineSaveButton } from "../../components/InlineSaveButton";
 import { useSaveAction } from "../../components/useSaveAction";
 
@@ -58,8 +59,7 @@ function parseHeight(fields: HeightFields, unit: Unit): number | null {
 export default function Settings() {
   const { data, update, flush } = useApp();
   const t = useTheme();
-  const [age, setAge] = useState(data.settings.age);
-  const [gender, setGender] = useState(data.settings.gender);
+  const [profile, setProfile] = useState(() => profileDraft(data.settings));
   const [height, setHeight] = useState(() =>
     heightFields(data.settings.heightCm),
   );
@@ -126,6 +126,11 @@ export default function Settings() {
       await flush();
     });
   }
+  function editProfileFields(patch: Partial<ProfileDraft>) {
+    if (busyRef.current) return;
+    setProfile((current) => ({ ...current, ...patch }));
+    profileSave.edited();
+  }
   function saveProfile() {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -134,13 +139,8 @@ export default function Settings() {
       let cm: number | null = null;
       try {
         const succeeded = await profileSave.run(() => {
-          if (age !== "" && (!/^\d+$/.test(age) || Number(age) < 1 || Number(age) > 130))
-            throw new Error("Enter an age from 1 to 130, or leave it blank.");
           cm = currentHeight();
-          update((current) => ({
-            ...current,
-            settings: { ...current.settings, age, gender, heightCm: cm },
-          }));
+          update((current) => editProfile(current, profile, cm));
         }, flush);
         if (succeeded) {
           setCanonicalHeight(cm);
@@ -182,27 +182,9 @@ export default function Settings() {
       <BodyWeightSettings disabled={busy} />
       <Card>
         <SectionTitle>Your profile</SectionTitle>
-        <Txt muted style={{ fontSize: 13 }}>
-          Optional. Included with your automatic workout uploads.
-        </Txt>
-        <Field
-          label="Age"
-          value={age}
-          editable={!busy}
-          onChangeText={(value) => {
-            if (!busyRef.current && value !== age) { setAge(value); profileSave.edited(); }
-          }}
-          keyboardType="number-pad"
-          maxLength={3}
-          placeholder="Optional"
-        />
-        <GenderSelector
-          value={gender}
-          disabled={busy}
-          onChange={(value) => {
-            if (!busyRef.current && value !== gender) { setGender(value); profileSave.edited(); }
-          }}
-        />
+        <Txt muted style={{ fontSize: 13 }}>Your required details. Height is optional.</Txt>
+        <PhoneFields value={profile} onChange={editProfileFields} disabled={busy} />
+        <PersonalProfileFields value={profile} onChange={editProfileFields} disabled={busy} />
         {data.settings.unit === "kg" ? (
           <Field
             label="Height (cm)"

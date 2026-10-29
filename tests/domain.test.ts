@@ -179,22 +179,25 @@ test("session starts once per date and snapshots survive definition/template mut
   assert.throws(() => startSession(data, template(), "9999-01-01"), /Future/);
 });
 
-test("finishing requires explicit completed or skipped valid sets and preserves cleared input", () => {
+test("finishing derives valid completed sets and requires confirmation for missing input", () => {
   const session = startSession(initialData(), template(), firstMonday).session;
-  assert.throws(() => finishSession(session, false), /explicitly skip/);
+  assert.throws(() => finishSession(session, false), /at least one/);
   assert.throws(() => finishSession(session, true), /at least one/);
   session.exercises[0].sets[0] = {
     classification: "working",
     weight: "100",
     reps: "8",
-    status: "completed",
+    status: "pending",
   };
+  assert.throws(() => finishSession(session, false), /confirm skipping/);
   const finished = finishSession(session, true);
   assert.equal(finished.status, "completed");
+  assert.equal(finished.exercises[0].sets[0].status, "completed");
   assert.equal(finished.exercises[0].sets[1].status, "skipped");
+  assert.equal(session.exercises[0].sets[0].status, "pending");
   assert.equal(session.exercises[0].sets[1].status, "pending");
   session.exercises[0].sets[0].weight = "";
-  assert.throws(() => finishSession(session, true), /valid weight/);
+  assert.throws(() => finishSession(session, true), /at least one/);
   session.exercises[0].sets[0].weight = "100";
   session.exercises[0].sets[0].reps = "8.5";
   assert.throws(() => finishSession(session, true), /whole number/);

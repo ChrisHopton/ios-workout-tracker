@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { homeDayPresentation } from "../src/components/homePresentation";
 import { initialData } from "../src/domain/library";
 import { saveTemplate } from "../src/domain/schedule";
-import { startSession } from "../src/domain/sessions";
+import { editSessionSet, finishSession, startSession } from "../src/domain/sessions";
 import { WorkoutTemplate } from "../src/domain/types";
 
 const monday = "2025-01-06";
@@ -38,7 +38,9 @@ test("Home offers Start for scheduled days and Choose for rest days, including h
 test("Home resumes the recorded snapshot even after its plan changes", () => {
   let data = startSession(scheduled(), workout, monday).data;
   const recorded = data.sessions[0];
-  recorded.exercises[0].sets[0].status = "completed";
+  recorded.exercises[0].sets[0] = {
+    classification: "working", weight: "100", reps: "8", status: "completed",
+  };
   recorded.exercises[0].sets[1].status = "skipped";
   data = saveTemplate(data, { ...workout, title: "New name", exercises: [{ ...workout.exercises[0], sets: 5 }] }, monday);
   const day = homeDayPresentation(data, monday, monday);
@@ -75,4 +77,31 @@ test("Home previews the schedule revision for the selected date", () => {
   const data = saveTemplate(scheduled(), { ...workout, title: "Updated workout" }, "2025-01-13");
   assert.equal(homeDayPresentation(data, monday, "2025-01-20").title, "Strength");
   assert.equal(homeDayPresentation(data, "2025-01-13", "2025-01-20").title, "Updated workout");
+});
+
+test("Home counts valid pending drafts without counting skipped or invalid input", () => {
+  const data = startSession(scheduled(), workout, monday).data;
+  const sets = data.sessions[0].exercises[0].sets;
+  sets[0] = { classification: "working", weight: "100", reps: "8", status: "pending" };
+  sets[1] = { classification: "working", weight: "100", reps: "8", status: "skipped" };
+  sets[2] = { classification: "working", weight: ".", reps: "8", status: "pending" };
+  const day = homeDayPresentation(data, monday, monday);
+  assert.equal(day.completedSets, 1);
+  assert.equal(day.actionLabel, "Resume workout");
+  assert.equal(sets[0].status, "pending", "presenting legacy progress must not mutate saved history");
+});
+
+test("Home progress follows edits to a resumed workout and distinguishes zero from blank", () => {
+  const started = startSession(scheduled(), workout, monday);
+  const completed = editSessionSet(started.session, 0, 0, { weight: "0", reps: "8" });
+  const finished = finishSession(completed, true);
+  let data = { ...started.data, sessions: [finished] };
+  assert.equal(homeDayPresentation(data, monday, monday).actionLabel, "View workout");
+  assert.equal(homeDayPresentation(data, monday, monday).completedSets, 1);
+  data = { ...data, sessions: [editSessionSet(finished, 0, 0, { weight: "" })] };
+  assert.equal(homeDayPresentation(data, monday, monday).actionLabel, "Resume workout");
+  assert.equal(homeDayPresentation(data, monday, monday).completedSets, 0);
+  data = { ...data, sessions: [editSessionSet(data.sessions[0], 0, 0, { weight: "0" })] };
+  assert.equal(homeDayPresentation(data, monday, monday).completedSets, 1);
+  assert.equal(homeDayPresentation(data, monday, monday).actionLabel, "Resume workout");
 });

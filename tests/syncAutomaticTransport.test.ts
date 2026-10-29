@@ -16,7 +16,7 @@ const GENERATION = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION = "33333333-3333-4333-8333-333333333333";
 const OTHER_INSTALLATION = "44444444-4444-4444-8444-444444444444";
 const AUTOMATIC: AnonymousSyncCredentials = {
-  version: 2, layout: "automatic", projectId: "workout-test", apiKey: "a".repeat(39),
+  version: 3, layout: "automatic", projectId: "workout-test", apiKey: "a".repeat(39),
   deviceId: DEVICE, generationId: GENERATION, uid: "anonymous_phone", refreshToken: "initial-refresh-secret",
 };
 const LEGACY: LegacySyncCredentials = {
@@ -66,15 +66,15 @@ test("automatic identities retain their UID and never collide with a legacy gene
   assert.throws(() => parseConnectionCode(`WORKOUTFB1.${Buffer.from(JSON.stringify(AUTOMATIC)).toString("base64url")}`));
 });
 
-test("automatic binding uses schema 2 while records and exact legacy commits retain schema 1", () => {
+test("automatic binding uses schema 3 and records use schema 2", () => {
   const binding = JSON.parse(makeCommitBody(BIND, AUTOMATIC));
   assert.deepEqual(binding, { writes: [{ update: { name: documentRoot(AUTOMATIC), fields: {
-    schemaVersion: { integerValue: "2" }, enabled: { booleanValue: true }, deviceId: { stringValue: DEVICE },
+    schemaVersion: { integerValue: "3" }, enabled: { booleanValue: true }, deviceId: { stringValue: DEVICE },
     generationId: { stringValue: GENERATION }, installationId: { stringValue: INSTALLATION },
   } } }] });
   const document = encodeFirestoreDocument(AUTOMATIC, INSTALLATION, CHANGE);
   assert.equal(document.name, `${documentRoot(AUTOMATIC)}/records/${CHANGE.key}`);
-  assert.deepEqual(document.fields.schemaVersion, { integerValue: "1" });
+  assert.deepEqual(document.fields.schemaVersion, { integerValue: "2" });
   assert.deepEqual(document.fields, encodeFirestoreDocument(LEGACY, INSTALLATION, CHANGE).fields);
   assert.equal(makeCommitBody(BIND, LEGACY), JSON.stringify({ writes: [{ update: {
     name: `projects/workout-test/databases/(default)/documents/devices/${DEVICE}/generations/${GENERATION}`,
@@ -289,8 +289,8 @@ test("browser vault preserves anonymous refresh rotation across saves and reject
 });
 
 test("native vault keeps anonymous rotation securely and never overwrites a transient read failure", async () => {
-  const [{ readFileSync }, { resolve }, typescript, protocol] = await Promise.all([
-    import("node:fs"), import("node:path"), import("typescript"), import("../src/sync/protocol"),
+  const [{ readFileSync }, { resolve }, typescript, protocol, reset] = await Promise.all([
+    import("node:fs"), import("node:path"), import("typescript"), import("../src/sync/protocol"), import("../src/sync/reset"),
   ]);
   const key = "workout.firebase.credentials.v1";
   const stored = new Map<string, string>();
@@ -315,6 +315,7 @@ test("native vault keeps anonymous rotation securely and never overwrites a tran
   new Function("exports", "require", compiled)(exported, (name: string) => {
     if (name === "expo-secure-store") return secureStore;
     if (name === "./protocol") return protocol;
+    if (name === "./reset") return reset;
     throw new Error("Unexpected dependency");
   });
   const vault = exported as typeof import("../src/sync/credentials");
@@ -333,6 +334,20 @@ test("native vault keeps anonymous rotation securely and never overwrites a tran
   failRead = false;
   stored.set(key, JSON.stringify({ credentials: AUTOMATIC, refreshToken: null }));
   assert.equal(await vault.loadRefreshToken(AUTOMATIC), AUTOMATIC.refreshToken);
+  const previousCredentials = { ...AUTOMATIC, version: 2 as const };
+  stored.set(key, JSON.stringify({ credentials: previousCredentials, refreshToken: "latest-wrapper-token" }));
+  const intent: import("../src/sync/reset").ResetIntent = { version: 1, epoch: reset.FRESH_START_EPOCH, sources: [protocol.identityOf(previousCredentials)], bootstrap: null,
+    target: { deviceId: OTHER_INSTALLATION, generationId: OTHER_INSTALLATION, installationId: INSTALLATION } };
+  const migrated = (await vault.migrateResetCredentials(intent))!;
+  assert.equal(migrated.version, 3); assert.equal(migrated.uid, previousCredentials.uid); assert.equal(migrated.deviceId, previousCredentials.deviceId);
+  assert.equal(migrated.generationId, intent.target.generationId); assert.equal(migrated.refreshToken, "latest-wrapper-token");
+  await vault.saveRefreshToken(previousCredentials, "late-old-token");
+  assert.equal(await vault.loadRefreshToken(migrated), "latest-wrapper-token");
+  await Promise.all([vault.migrateResetCredentials(intent), vault.saveRefreshToken(migrated, "newest-token")]);
+  assert.equal((await vault.migrateResetCredentials(intent))!.refreshToken, "newest-token");
+  failRead = true; const writesBeforeLockedReset = writes;
+  await assert.rejects(vault.migrateResetCredentials(intent));
+  assert.equal(writes, writesBeforeLockedReset); failRead = false;
   await vault.removeCredentials();
   await vault.saveRefreshToken(AUTOMATIC, "late-secret");
   assert.equal(await vault.loadCredentials(), null);
@@ -374,8 +389,8 @@ test("only automatic binding Firestore permission denials retry enrollment while
     }));
     await assert.rejects(transport(request, credentials), (error: unknown) =>
       error instanceof SyncError && error.kind === expectedKind && error.retryable === retryable);
-    assert.equal(urls.length, 2);
-    assert.ok(urls[1].includes("firestore.googleapis.com"));
+    assert.equal(urls.length, credentials.version === 1 ? 0 : 2);
+    if (credentials.version !== 1) assert.ok(urls[1].includes("firestore.googleapis.com"));
   }
   let refreshes = 0;
   const revoked = createSyncTransport(fetcher(async (input) => {

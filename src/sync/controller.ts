@@ -1,3 +1,4 @@
+import type { ResetIntent } from "./reset";
 import type { BootstrapDraft } from "./bootstrap";
 import {
   parseConnectionCode,
@@ -5,6 +6,7 @@ import {
   identityOf,
   validateCredentials,
   type SyncCredentials,
+  type AnonymousSyncCredentials,
   type SyncIdentity,
   type UploadBatch,
 } from "./protocol";
@@ -20,6 +22,8 @@ export interface SyncLocalState extends SyncIdentity {
   initialComplete: boolean;
 }
 export interface SyncRepository {
+  pendingReset?(): Promise<ResetIntent | null>;
+  completeReset?(intent: ResetIntent, identity: SyncIdentity, label: string): Promise<void>;
   prepareBootstrap?(candidate: BootstrapDraft): Promise<BootstrapDraft>;
   state(): Promise<SyncLocalState | null>;
   pendingEnrollment(): Promise<SyncLocalState | null>;
@@ -33,6 +37,7 @@ export interface SyncRepository {
   acknowledge(batchId: string, acks: { key: string; revision: number }[], at: string): Promise<void>;
 }
 export interface SyncSecrets {
+  migrateReset?(intent: ResetIntent): Promise<AnonymousSyncCredentials | null>;
   load(): Promise<SyncCredentials | null>;
   save(credentials: SyncCredentials): Promise<void>;
   remove(): Promise<void>;

@@ -1,5 +1,6 @@
+import { resetCredentials, type ResetIntent } from "./reset";
 import * as SecureStore from "expo-secure-store";
-import { sameIdentity, validateCredentials, type SyncCredentials } from "./protocol";
+import { sameIdentity, validateCredentials, type SyncCredentials, type AnonymousSyncCredentials } from "./protocol";
 
 const KEY = "workout.firebase.credentials.v1";
 const LEGACY_KEY = "workout.sheets.credentials.v1";
@@ -18,7 +19,7 @@ function serial<T>(operation: () => Promise<T>): Promise<T> {
 function same(left: SyncCredentials, right: SyncCredentials): boolean {
   const a = validateCredentials(left);
   const b = validateCredentials(right);
-  if (a.version === 2 && b.version === 2) return sameIdentity(a, b) && a.apiKey === b.apiKey;
+  if (a.version !== 1 && b.version !== 1) return sameIdentity(a, b) && a.apiKey === b.apiKey;
   return JSON.stringify(a) === JSON.stringify(b);
 }
 function token(value: unknown): string | null {
@@ -67,10 +68,10 @@ export function saveCredentials(credentials: SyncCredentials): Promise<void> {
         if (!(error instanceof InvalidStoredCredentials)) throw error;
       }
       const refreshToken = previous && same(previous.credentials, checked)
-        ? previous.refreshToken ?? (previous.credentials.version === 2 ? previous.credentials.refreshToken : null)
-        : checked.version === 2 ? checked.refreshToken : null;
+        ? previous.refreshToken ?? (previous.credentials.version !== 1 ? previous.credentials.refreshToken : null)
+        : checked.version !== 1 ? checked.refreshToken : null;
       await SecureStore.setItemAsync(KEY, JSON.stringify({
-        credentials: checked.version === 2 && refreshToken ? { ...checked, refreshToken } : checked,
+        credentials: checked.version !== 1 && refreshToken ? { ...checked, refreshToken } : checked,
         refreshToken,
       }), OPTIONS);
       await SecureStore.deleteItemAsync(LEGACY_KEY, OPTIONS);
@@ -84,7 +85,7 @@ export function loadRefreshToken(credentials: SyncCredentials): Promise<string |
     try {
       const stored = await read();
       return stored && same(stored.credentials, credentials)
-        ? stored.refreshToken ?? (stored.credentials.version === 2 ? stored.credentials.refreshToken : null)
+        ? stored.refreshToken ?? (stored.credentials.version !== 1 ? stored.credentials.refreshToken : null)
         : null;
     } catch {
       throw new Error("The saved cloud authorization could not be read. Unlock your phone and try again.");
@@ -98,7 +99,7 @@ export function saveRefreshToken(credentials: SyncCredentials, refreshToken: str
       const stored = await read();
       if (!stored || !same(stored.credentials, credentials) || stored.refreshToken === checked) return;
       await SecureStore.setItemAsync(KEY, JSON.stringify({
-        credentials: stored.credentials.version === 2 ? { ...stored.credentials, refreshToken: checked } : stored.credentials,
+        credentials: stored.credentials.version !== 1 ? { ...stored.credentials, refreshToken: checked } : stored.credentials,
         refreshToken: checked,
       }), OPTIONS);
     } catch {
@@ -112,5 +113,15 @@ export function removeCredentials(): Promise<void> {
     try { await SecureStore.deleteItemAsync(KEY, OPTIONS); } catch { failed = true; }
     try { await SecureStore.deleteItemAsync(LEGACY_KEY, OPTIONS); } catch { failed = true; }
     if (failed) throw new Error("The saved cloud connection could not be removed. Try again.");
+  });
+}
+
+/** Preserve the latest token and accept either side of a crash between SQLite and Keychain. */
+export function migrateResetCredentials(intent: ResetIntent): Promise<AnonymousSyncCredentials | null> {
+  return serial(async () => {
+    const stored = await read();
+    const next = resetCredentials(stored?.credentials ?? null, stored?.refreshToken ?? null, intent);
+    if (next) await SecureStore.setItemAsync(KEY, JSON.stringify({ credentials: next, refreshToken: next.refreshToken }), OPTIONS);
+    return next;
   });
 }

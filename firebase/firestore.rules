@@ -1,32 +1,15 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Profile reset fence: enrollment v3, record envelope v2; legacy paths remain denied.
     function uuid(value) {
       return value is string && value.matches('[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
-    }
-    function authorized(deviceId, generationId) {
-      let authorization = get(/databases/$(database)/documents/uploadAuthorizations/$(request.auth.uid)).data;
-      return request.auth != null && authorization.enabled == true
-        && authorization.deviceId == deviceId && authorization.generationId == generationId;
-    }
-    function binding(deviceId, generationId) {
-      let data = request.resource.data;
-      return data.keys().hasAll(['schemaVersion', 'deviceId', 'generationId', 'installationId'])
-        && data.keys().hasOnly(['schemaVersion', 'deviceId', 'generationId', 'installationId'])
-        && data.schemaVersion == 1 && uuid(deviceId) && uuid(generationId)
-        && data.deviceId == deviceId && data.generationId == generationId && uuid(data.installationId);
-    }
-    function enrolled(deviceId, generationId) {
-      let enrollment = get(/databases/$(database)/documents/devices/$(deviceId)/generations/$(generationId)).data;
-      return enrollment.schemaVersion == 1 && enrollment.deviceId == deviceId
-        && enrollment.generationId == generationId
-        && enrollment.installationId == request.resource.data.installationId;
     }
     function record(deviceId, generationId, key) {
       let data = request.resource.data;
       return data.keys().hasAll(['schemaVersion', 'deviceId', 'generationId', 'installationId', 'key', 'kind', 'revision', 'deleted', 'payload'])
         && data.keys().hasOnly(['schemaVersion', 'deviceId', 'generationId', 'installationId', 'key', 'kind', 'revision', 'deleted', 'payload'])
-        && data.schemaVersion == 1 && data.deviceId == deviceId && data.generationId == generationId
+        && data.schemaVersion == 2 && data.deviceId == deviceId && data.generationId == generationId
         && uuid(deviceId) && uuid(generationId) && uuid(data.installationId)
         && data.key == key && key.size() > 0 && key.size() <= 1500
         && data.kind in ['profile', 'body_weight', 'exercise', 'plan', 'schedule', 'schedule_template', 'workout', 'workout_exercise', 'completion']
@@ -37,20 +20,6 @@ service cloud.firestore {
              && data.payload.keys().hasOnly(['initialUploadComplete']) && data.payload.initialUploadComplete == true)
             || (data.kind != 'completion' && key.matches(data.kind + ':' + deviceId + ':.+')));
     }
-    match /devices/{deviceId}/generations/{generationId} {
-      allow create: if request.auth != null && authorized(deviceId, generationId) && binding(deviceId, generationId);
-      allow update: if request.auth != null && authorized(deviceId, generationId)
-        && binding(deviceId, generationId) && request.resource.data == resource.data;
-      allow read, delete: if false;
-      match /records/{key} {
-        allow create: if request.auth != null && authorized(deviceId, generationId)
-          && record(deviceId, generationId, key) && enrolled(deviceId, generationId);
-        allow update: if request.auth != null && authorized(deviceId, generationId)
-          && record(deviceId, generationId, key) && enrolled(deviceId, generationId)
-          && (request.resource.data.revision > resource.data.revision || request.resource.data == resource.data);
-        allow read, delete: if false;
-      }
-    }
     function automaticOwner(uid) {
       return request.auth != null && request.auth.uid == uid;
     }
@@ -58,12 +27,12 @@ service cloud.firestore {
       let data = request.resource.data;
       return data.keys().hasAll(['schemaVersion', 'enabled', 'deviceId', 'generationId', 'installationId'])
         && data.keys().hasOnly(['schemaVersion', 'enabled', 'deviceId', 'generationId', 'installationId'])
-        && data.schemaVersion == 2 && data.enabled == true
+        && data.schemaVersion == 3 && data.enabled == true
         && uuid(data.deviceId) && uuid(data.generationId) && uuid(data.installationId);
     }
     function automaticRecord(uid, key) {
       let enrollment = get(/databases/$(database)/documents/automaticUploads/$(uid)).data;
-      return enrollment.schemaVersion == 2 && enrollment.enabled == true
+      return enrollment.schemaVersion == 3 && enrollment.enabled == true
         && enrollment.installationId == request.resource.data.installationId
         && record(enrollment.deviceId, enrollment.generationId, key);
     }

@@ -1,5 +1,7 @@
 # Install Workout on your iPhone from Windows
 
+The required-device-profile release intentionally starts both phones fresh. Follow [profile reset rollout](PROFILE_RESET.md), pause recording until onboarding appears, and do not uninstall. Later updates preserve the new journal. Phone numbers are profile information, not login credentials.
+
 The `preview` profile creates a standalone private iPhone app with its JavaScript and assets bundled. After installation, recording and analytics work offline with your Windows PC switched off. This is an EAS internal distribution build. [Expo's preview-build guide](https://docs.expo.dev/tutorial/eas/internal-distribution-builds/)
 
 Native Firebase App Check with production App Attest requires a binary containing those modules. A phone that lacks them needs a new native installation; OTA cannot add them. **Install over Workout using the same Apple team and bundle identifier to retain local history. Do not uninstall.**

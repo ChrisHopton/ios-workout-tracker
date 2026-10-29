@@ -1,3 +1,4 @@
+import { initialData } from "../src/domain/library";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { validateData } from "../src/domain/backup";
@@ -56,7 +57,7 @@ function fixture(): AppData {
     ],
   };
   return {
-    schemaVersion: 2, bodyWeights: [], settings: { age: "29", gender: "+literal gender", heightCm: 181.5, unit: "lb" },
+    schemaVersion: 3, bodyWeights: [], settings: { ...initialData().settings, firstName: "+literal name", gender: "Male", heightCm: 181.5, unit: "lb" },
     exercises: [
       { ...session.exercises[0].exercise, name: "Current lift", incrementLb: 5, incrementKg: 2.5 },
       { ...session.exercises[1].exercise, name: "Current push-up" },
@@ -96,7 +97,7 @@ function worstCaseFixture(): AppData {
     })),
   };
   const data: AppData = {
-    schemaVersion: 2, bodyWeights: [], settings: { age: "130", gender: "界".repeat(80), heightCm: 300, unit: "kg" },
+    schemaVersion: 3, bodyWeights: [], settings: { ...initialData().settings, firstName: "界".repeat(80), gender: "Female", heightCm: 300, unit: "kg" },
     exercises, templates: [template], sessions: [session],
     scheduleRevisions: [{
       id: "史".repeat(100), effectiveDate: "2025-03-09", anchorMonday: "2025-03-03",
@@ -215,8 +216,8 @@ test("clear versus zero updates one exercise document and tombstones clear perso
 });
 
 test("cleared profile values remain exact and completion markers have their fixed shape", () => {
-  const profile = makeProfileDocument({ age: "", gender: "", heightCm: null, unit: "kg" }, DEVICE_A, "Phone");
-  assert.deepEqual(profile.payload, { phoneLabel: "Phone", age: "", gender: "", heightCm: null, unit: "kg" });
+  const profile = makeProfileDocument({ ...initialData().settings, unit: "kg" }, DEVICE_A, "Phone");
+  assert.deepEqual(profile.payload, { phoneLabel: "Phone", ...initialData().settings, unit: "kg" });
   const completion = { ...makeCompletionDocument(), revision: 1, deleted: false };
   assert.deepEqual(validateDocumentChange(completion, DEVICE_A), completion);
   for (const item of [{ ...completion, deleted: true }, { ...completion, payload: { initialUploadComplete: false } }, { ...completion, payload: { initialUploadComplete: true, extra: 1 } }])
@@ -264,7 +265,7 @@ test("Firestore envelope matches generation path contains no credentials and kee
   assert.equal(encoded.name, `projects/workout-test/databases/(default)/documents/devices/${DEVICE_A}/generations/${GENERATION}/records/${item.key}`);
   assert.equal(recordDocumentName(credentials, item.key), encoded.name);
   assert.deepEqual(Object.keys(encoded.fields), ["schemaVersion", "deviceId", "generationId", "installationId", "key", "kind", "revision", "deleted", "payload"]);
-  assert.deepEqual(encoded.fields.schemaVersion, { integerValue: "1" });
+  assert.deepEqual(encoded.fields.schemaVersion, { integerValue: "2" });
   assert.deepEqual(encoded.fields.revision, { integerValue: "7" });
   assert.deepEqual(encoded.fields.deleted, { booleanValue: false });
   assert.deepEqual(encoded.fields.payload, encodeFirestoreValue(item.payload));

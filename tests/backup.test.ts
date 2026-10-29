@@ -96,12 +96,12 @@ test("allows unfinished numeric drafts without considering them completed sets",
 test("rejects malformed JSON, versions, missing fields, unknown properties and oversize input", () => {
   assert.throws(() => parseBackup("{"), /not valid JSON/);
   assert.throws(
-    () => parseBackup(JSON.stringify({ ...initialData(), schemaVersion: 3 })),
+    () => parseBackup(JSON.stringify({ ...initialData(), schemaVersion: 4 })),
     /schemaVersion/,
   );
   assert.throws(
     () => parseBackup(JSON.stringify({ ...initialData(), settings: {} })),
-    /settings.age/,
+    /settings.phoneCountryCode/,
   );
   assert.throws(
     () => parseBackup(JSON.stringify({ ...initialData(), prototype: {} })),

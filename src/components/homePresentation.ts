@@ -1,4 +1,5 @@
 import { scheduleForDate } from "../domain/schedule";
+import { inspectSessionRecording } from "../domain/sessions";
 import { AppData } from "../domain/types";
 
 export function homeDayPresentation(data: AppData, date: string, currentDate: string) {
@@ -8,10 +9,7 @@ export function homeDayPresentation(data: AppData, date: string, currentDate: st
   const setCount = session
     ? session.exercises.reduce((count, item) => count + item.sets.length, 0)
     : template?.exercises.reduce((count, item) => count + item.sets, 0) ?? 0;
-  const completedSets = session?.exercises.reduce(
-    (count, item) => count + item.sets.filter((set) => set.status === "completed").length,
-    0,
-  ) ?? 0;
+  const completedSets = session ? inspectSessionRecording(session).completedSets : 0;
 
   return {
     session,

@@ -30,14 +30,18 @@ export interface LegacySyncCredentials extends SyncIdentity {
   email: string;
   password: string;
 }
-export interface AnonymousSyncCredentials extends SyncIdentity {
+export interface PreviousAnonymousSyncCredentials extends SyncIdentity {
   version: 2;
   layout: "automatic";
   uid: string;
   apiKey: string;
   refreshToken: string;
 }
-export type SyncCredentials = LegacySyncCredentials | AnonymousSyncCredentials;
+export interface AnonymousSyncCredentials extends Omit<PreviousAnonymousSyncCredentials, "version"> {
+  version: 3;
+}
+/** Versions 1 and 2 are readable only to reconcile the deliberate fresh start. */
+export type SyncCredentials = LegacySyncCredentials | PreviousAnonymousSyncCredentials | AnonymousSyncCredentials;
 export interface UploadBatch {
   id: string;
   changes: DocumentChange[];
@@ -98,14 +102,14 @@ export function validateCredentials(value: unknown): SyncCredentials {
     typeof value.uid !== "string" || !UID.test(value.uid)
   ) throw new Error("Invalid Firestore connection");
   const identity = validateIdentity(value);
-  if (value.version === 2) {
+  if (value.version === 2 || value.version === 3) {
     if (
       !exactKeys(value, ["version", "layout", "projectId", "apiKey", "deviceId", "generationId", "uid", "refreshToken"]) ||
       value.layout !== "automatic" || typeof value.refreshToken !== "string" ||
       !/^[!-~]{1,16384}$/.test(value.refreshToken)
     ) throw new Error("Invalid Firestore connection");
     return {
-      version: 2, ...identity, layout: "automatic", uid: value.uid, apiKey: value.apiKey,
+      version: value.version, ...identity, layout: "automatic", uid: value.uid, apiKey: value.apiKey,
       refreshToken: value.refreshToken,
     };
   }
@@ -280,7 +284,7 @@ export function encodeFirestoreDocument(
   if (!UUID.test(installationId)) throw new Error("Invalid installation identity");
   const document = validateDocumentChange(change, checked.deviceId);
   const envelope = encodeFirestoreValue({
-    schemaVersion: 1, deviceId: checked.deviceId, generationId: checked.generationId,
+    schemaVersion: 2, deviceId: checked.deviceId, generationId: checked.generationId,
     installationId, key: document.key, kind: document.kind, revision: document.revision,
     deleted: document.deleted, payload: document.payload,
   });

@@ -1,3 +1,4 @@
+import { FRESH_START_EPOCH } from "../sync/reset";
 import { validateBootstrap, type BootstrapDraft } from "../sync/bootstrap";
 import type { AppData } from "../domain/types";
 import { initialData } from "../domain/library";
@@ -15,17 +16,27 @@ const known = new Map<string, UploadDocument>();
 const key = "workout-browser-preview-v1";
 const same = sameIdentity;
 let bootstrap: BootstrapDraft | null = null;
+const lifecycleKey = "workout-browser-lifecycle";
+const dataKey = "workout-browser-preview-v3";
 export async function loadData(): Promise<AppData> {
-  const value = localStorage.getItem(key);
-  priorData = value ? upgradeData(JSON.parse(value)) : initialData();
-  if (value && JSON.parse(value).schemaVersion === 1) {
-    localStorage.setItem("workout-browser-before-v1-to-v2", value);
-    localStorage.setItem(key, JSON.stringify(priorData));
+  const marker = localStorage.getItem(lifecycleKey);
+  if (marker !== null && marker !== FRESH_START_EPOCH) throw new Error("The browser preview lifecycle needs attention.");
+  if (marker === null) {
+    // The single new data slot is authoritative. Retrying a failed marker write only repeats this
+    // reset before onboarding has ever been shown; a completed marker never erases new work.
+    localStorage.setItem(dataKey, JSON.stringify(initialData()));
+    localStorage.removeItem(key);
+    localStorage.removeItem("workout-browser-before-v1-to-v2");
+    localStorage.setItem(lifecycleKey, FRESH_START_EPOCH);
+    syncState = null; staging = null; frozen = null; bootstrap = null; outbox.clear(); known.clear();
   }
+  const value = localStorage.getItem(dataKey);
+  if (!value) throw new Error("The browser preview journal is missing.");
+  priorData = upgradeData(JSON.parse(value));
   return priorData;
 }
 export async function writeData(data: AppData): Promise<void> {
-  localStorage.setItem(key, JSON.stringify(data));
+  localStorage.setItem(dataKey, JSON.stringify(data));
   if (syncState?.enabled && priorData) {
     const changes = changedRows(projectData(priorData, syncState.deviceId, syncState.label), projectData(data, syncState.deviceId, syncState.label));
     if (changes.length) {

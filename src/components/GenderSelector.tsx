@@ -8,14 +8,16 @@ export function GenderSelector({
   value,
   onChange,
   disabled = false,
+  required = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  required?: boolean;
 }) {
   const t = useTheme();
   const [open, setOpen] = useState(false);
-  const label = genderLabel(value);
+  const label = required && !value ? "Choose Male or Female" : genderLabel(value);
   const close = () => setOpen(false);
 
   return (
@@ -66,7 +68,7 @@ export function GenderSelector({
               <View accessible accessibilityRole="header">
                 <SectionTitle>Gender</SectionTitle>
               </View>
-              <Txt muted>Optional. Choose a value, then save your profile.</Txt>
+              <Txt muted>{required ? "Choose Male or Female, then save your profile." : "Optional. Choose a value, then save your profile."}</Txt>
               {GENDER_OPTIONS.map((option) => {
                 const selected = value.trim().toLowerCase() === option.value;
                 return (

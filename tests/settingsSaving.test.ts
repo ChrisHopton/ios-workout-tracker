@@ -221,7 +221,7 @@ test("a retained quick entry ID is not reused after midnight", () => {
 test("profile retry re-enqueues the same draft after an optimistic snapshot's flush failed", async () => {
   const action = new SaveAction();
   let data = snapshot(initialData());
-  const profileDraft = { age: "33", gender: "Legacy custom value", heightCm: 177.123456 };
+  const profileDraft = { dateOfBirth: "1993-01-01", gender: "Female" as const, heightCm: 177.123456 };
   let writes = 0;
   const queue = new SaveQueue<AppData>(async () => {
     if (++writes === 1) throw new Error("Disk full");
@@ -234,7 +234,7 @@ test("profile retry re-enqueues the same draft after an optimistic snapshot's fl
   };
   assert.equal(await action.run(change, () => queue.flush()), false);
   assert.equal(action.getSnapshot().status, "error");
-  assert.deepEqual(profileDraft, { age: "33", gender: "Legacy custom value", heightCm: 177.123456 });
+  assert.deepEqual(profileDraft, { dateOfBirth: "1993-01-01", gender: "Female" as const, heightCm: 177.123456 });
   assert.equal(await action.run(change, () => queue.flush()), true);
   assert.equal(writes, 2);
   assert.equal(action.getSnapshot().status, "saved");

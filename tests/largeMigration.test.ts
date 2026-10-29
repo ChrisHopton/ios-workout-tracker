@@ -1,3 +1,4 @@
+import { initialData } from "../src/domain/library";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createJournalStorage } from "../src/data/journalStorage";
@@ -10,6 +11,7 @@ import { historyFixture, sqliteHarness } from "./storageFixture";
 function largeLegacyJournal() {
   const data: any = historyFixture(3500);
   data.schemaVersion = 1;
+  data.settings = { age: "", gender: "", heightCm: null, unit: "lb" };
   delete data.bodyWeights;
   for (const session of data.sessions) for (const entry of session.exercises) {
     delete entry.suggestion.algorithmVersion;
@@ -18,7 +20,7 @@ function largeLegacyJournal() {
   return validateLegacyData(data);
 }
 
-test("large trusted journals migrate through both legacy layouts without relaxing portable backup limits", async (t) => {
+test("large old journals reset without making recovery copies or relaxing portable backup limits", async (t) => {
   const original = largeLegacyJournal();
   const text = JSON.stringify(original);
   assert.ok(Buffer.byteLength(text) > MAX_BACKUP_BYTES);
@@ -41,32 +43,18 @@ test("large trusted journals migrate through both legacy layouts without relaxin
           const insert = sql.native.prepare("INSERT INTO workout_sessions VALUES (?, ?, ?)");
           for (const [position, session] of sessions.entries()) insert.run(session.id, position, JSON.stringify(session));
         }
-        let recovery = "";
-        let failBackup = true;
-        const store = createJournalStorage(sql.db, { beforeMigration: async (data, from, to) => {
-          assert.equal(from, version); assert.equal(to, 5);
-          if (failBackup) throw new Error("recovery disk full");
-          recovery = serializeStoredBackup(data);
-        } });
-        await assert.rejects(store.load(), /recovery disk full/);
-        assert.equal(sql.native.prepare("PRAGMA user_version").get()!.user_version, version);
-        assert.equal(recovery, "");
-        failBackup = false;
+        let backups = 0;
+        const store = createJournalStorage(sql.db, { beforeMigration: async () => { backups++; } });
         await store.sync.state();
         sql.failCommit();
         await assert.rejects(store.load(), /commit failure/);
         assert.equal(sql.native.prepare("PRAGMA user_version").get()!.user_version, version);
-        assert.deepEqual(JSON.parse(recovery), original);
-        if (layout === "app_state") {
-          assert.equal(sql.native.prepare("SELECT value FROM app_state").get()!.value, text);
-        } else {
-          assert.equal(sql.native.prepare("SELECT value FROM journal_meta").get()!.value, JSON.stringify(metadata));
-          assert.equal(sql.native.prepare("SELECT COUNT(*) AS count FROM workout_sessions").get()!.count, sessions.length);
-        }
+        if (layout === "app_state") assert.equal(sql.native.prepare("SELECT value FROM app_state").get()!.value, text);
+        else assert.equal(sql.native.prepare("SELECT COUNT(*) AS count FROM workout_sessions").get()!.count, sessions.length);
         const result = await store.load();
-        assert.deepEqual(result, upgradeData(original));
-        assert.deepEqual(JSON.parse(recovery), original);
-        assert.equal(sql.native.prepare("PRAGMA user_version").get()!.user_version, 5);
+        assert.deepEqual(result, initialData());
+        assert.equal(backups, 0);
+        assert.equal(sql.native.prepare("PRAGMA user_version").get()!.user_version, 6);
         assert.deepEqual(await createJournalStorage(sql.db).load(), result);
       } finally { sql.close(); }
     });

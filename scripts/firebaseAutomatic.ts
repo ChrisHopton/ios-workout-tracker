@@ -351,7 +351,7 @@ export async function runAutomaticOwnerCommand(options: AutomaticOwnerArguments,
 function identity(data: unknown, automatic: boolean) {
   if (!object(data) || typeof data.enabled !== "boolean" || typeof data.deviceId !== "string" || !UUID.test(data.deviceId) ||
     typeof data.generationId !== "string" || !UUID.test(data.generationId) ||
-    (automatic && (data.schemaVersion !== 2 || typeof data.installationId !== "string" || !UUID.test(data.installationId)))) {
+    (automatic && (![2, 3].includes(Number(data.schemaVersion)) || typeof data.installationId !== "string" || !UUID.test(data.installationId)))) {
     throw new OwnerManagementError("An installation contains invalid authorization metadata");
   }
   return { enabled: data.enabled, deviceId: data.deviceId, generationId: data.generationId,

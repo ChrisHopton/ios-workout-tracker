@@ -1,4 +1,6 @@
-import { upgradeData, validateStoredData, type LegacyAppData } from "../domain/backup";
+import { FRESH_START_EPOCH } from "../sync/reset";
+import type { ResetIntent } from "../sync/reset";
+import { upgradeData, type StoredAppData } from "../domain/backup";
 import { initialData } from "../domain/library";
 import { AppData, WorkoutSession } from "../domain/types";
 import { snapshot } from "./snapshot";
@@ -26,7 +28,7 @@ interface StoredSession {
   position: number;
 }
 
-export function createJournalStorage(db: JournalDatabase, options: { beforeMigration?: (data: AppData | LegacyAppData, fromVersion: number, toVersion: number) => Promise<void> } = {}) {
+export function createJournalStorage(db: JournalDatabase, options: { createId?: () => string; cleanupRecovery?: () => Promise<void>; beforeMigration?: (data: StoredAppData, fromVersion: number, toVersion: number) => Promise<void> } = {}) {
   const sync = createSyncJournal(db);
   let tail: Promise<unknown> = Promise.resolve();
   function serial<T>(operation: () => Promise<T>): Promise<T> {
@@ -87,7 +89,7 @@ export function createJournalStorage(db: JournalDatabase, options: { beforeMigra
           await tx.runAsync("DELETE FROM workout_sessions WHERE id = ?", id);
         await sync.capture(tx, saved, next);
         if (migrate) await tx.execAsync("DROP TABLE app_state;");
-        await tx.execAsync("PRAGMA user_version = 5;");
+        await tx.execAsync("PRAGMA user_version = 6;");
       });
     }
     // Advance the comparison cache only after the complete transaction succeeds
@@ -96,32 +98,35 @@ export function createJournalStorage(db: JournalDatabase, options: { beforeMigra
     sessions = nextSessions;
   }
 
-  async function backupBeforeMigration() {
-    if (!options.beforeMigration) return;
-    const version = await db.getFirstAsync<{ user_version: number }>("PRAGMA user_version");
-    if (!version || version.user_version < 1 || version.user_version >= 5) return;
-    const metaExists = await db.getFirstAsync<{ name: string }>("SELECT name FROM sqlite_master WHERE name = 'journal_meta'");
-    if (metaExists) {
-      const meta = await db.getFirstAsync<{ value: string }>("SELECT value FROM journal_meta WHERE id = 1");
-      if (meta) {
-        const rows = await db.getAllAsync<{ value: string }>("SELECT value FROM workout_sessions ORDER BY position");
-        await options.beforeMigration(validateStoredData({ ...JSON.parse(meta.value), sessions: rows.map((row) => JSON.parse(row.value)) }), version.user_version, 5);
-      }
-    } else {
-      const legacy = await db.getFirstAsync<{ name: string }>("SELECT name FROM sqlite_master WHERE name = 'app_state'");
-      if (legacy) {
-        const row = await db.getFirstAsync<{ value: string }>("SELECT value FROM app_state WHERE id = 1");
-        if (row) await options.beforeMigration(validateStoredData(JSON.parse(row.value)), version.user_version, 5);
-      }
+  async function prepareFreshStart() {
+    await sync.initialize();
+    await db.execAsync("PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS journal_meta (id INTEGER PRIMARY KEY CHECK (id = 1), value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS workout_sessions (id TEXT PRIMARY KEY, position INTEGER NOT NULL, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS app_lifecycle (id INTEGER PRIMARY KEY CHECK(id = 1), epoch TEXT NOT NULL, cleanup_complete INTEGER NOT NULL);");
+    const marker = await db.getFirstAsync<{ epoch: string; cleanup_complete: number }>("SELECT epoch, cleanup_complete FROM app_lifecycle WHERE id = 1");
+    if (marker && (marker.epoch !== FRESH_START_EPOCH || ![0, 1].includes(marker.cleanup_complete)))
+      throw new Error("The saved app lifecycle needs attention.");
+    if (!marker) {
+      const next = snapshot(initialData());
+      const { sessions: _records, ...details } = next;
+      const createId = options.createId ?? (() => globalThis.crypto.randomUUID());
+      await db.withExclusiveTransactionAsync(async tx => {
+        await sync.resetForFreshStart(tx, createId);
+        await tx.execAsync("DELETE FROM workout_sessions; DELETE FROM journal_meta; DROP TABLE IF EXISTS app_state;");
+        await tx.runAsync("INSERT INTO journal_meta (id, value) VALUES (1, ?)", JSON.stringify(details));
+        await tx.runAsync("INSERT INTO app_lifecycle (id, epoch, cleanup_complete) VALUES (1, ?, 0)", FRESH_START_EPOCH);
+        await tx.execAsync("PRAGMA user_version = 6;");
+      });
+      saved = undefined; metadata = ""; sessions = new Map();
+    }
+    if (!marker || marker.cleanup_complete === 0) {
+      await options.cleanupRecovery?.();
+      // Release deleted journal/queue pages and their WAL copies before publishing fresh data.
+      await db.execAsync("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");
+      await db.runAsync("UPDATE app_lifecycle SET cleanup_complete = 1 WHERE id = 1");
     }
   }
 
   async function read(): Promise<AppData> {
-    await backupBeforeMigration();
-    await sync.initialize();
-    await db.execAsync(
-      "PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS journal_meta (id INTEGER PRIMARY KEY CHECK (id = 1), value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS workout_sessions (id TEXT PRIMARY KEY, position INTEGER NOT NULL, value TEXT NOT NULL);",
-    );
+    await prepareFreshStart();
     const row = await db.getFirstAsync<{ value: string }>(
       "SELECT value FROM journal_meta WHERE id = 1",
     );
@@ -146,24 +151,10 @@ export function createJournalStorage(db: JournalDatabase, options: { beforeMigra
         ]),
       );
       await write(next);
-      await db.execAsync("PRAGMA user_version = 5;");
+      await db.execAsync("PRAGMA user_version = 6;");
       return next;
     }
-    const legacy = await db.getFirstAsync<{ name: string }>(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_state'",
-    );
-    if (legacy) {
-      const old = await db.getFirstAsync<{ value: string }>(
-        "SELECT value FROM app_state WHERE id = 1",
-      );
-      const next = old ? upgradeData(JSON.parse(old.value)) : initialData();
-      await write(next, true);
-      await db.execAsync("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");
-      return next;
-    }
-    await db.execAsync("PRAGMA user_version = 5;");
-    saved = snapshot(initialData());
-    return saved;
+    throw new Error("The saved journal is missing. Your app data needs attention.");
   }
 
   function load(): Promise<AppData> {
@@ -174,6 +165,8 @@ export function createJournalStorage(db: JournalDatabase, options: { beforeMigra
   }
 
   const repository = {
+    pendingReset: () => serial(() => sync.pendingReset()),
+    completeReset: (intent: ResetIntent, identity: SyncIdentity, label: string) => serial(() => sync.completeReset(intent, identity, label)),
     prepareBootstrap: (draft: BootstrapDraft) => serial(() => sync.prepareBootstrap(draft)),
     state: () => serial(() => sync.state()),
     pendingEnrollment: () => serial(() => sync.pendingEnrollment()),

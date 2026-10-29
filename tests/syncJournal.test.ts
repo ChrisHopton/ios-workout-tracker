@@ -1,3 +1,4 @@
+import { initialData } from "../src/domain/library";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createJournalStorage } from "../src/data/journalStorage";
@@ -185,13 +186,13 @@ test("daily attempts persist across generations and Pacific midnight DST", async
     assert.equal(pacificDay(nextPacificDay(Date.parse("2026-03-08T08:30:00Z"))), "2026-03-09");
   } finally { sql.close(); }
 });
-test("v3 migration preserves the journal and removes Sheets state", async () => {
+test("old Sheets journal resets with its queue state in the same transaction", async () => {
   const sql = sqliteHarness();
   try {
     const store = createJournalStorage(sql.db); await store.load(); const data = historyFixture(2); await store.write(data);
-    sql.native.exec("CREATE TABLE sync_state (id INTEGER PRIMARY KEY, device_id TEXT); CREATE TABLE sync_rows (key TEXT); CREATE TABLE sync_outbox (key TEXT); PRAGMA user_version = 3;");
-    const reopened = createJournalStorage(sql.db); assert.deepEqual(await reopened.load(), data);
-    assert.equal(sql.native.prepare("PRAGMA user_version").get()?.user_version, 5);
+    sql.native.exec("CREATE TABLE sync_state (id INTEGER PRIMARY KEY, device_id TEXT); CREATE TABLE sync_rows (key TEXT); CREATE TABLE sync_outbox (key TEXT); DELETE FROM app_lifecycle; PRAGMA user_version = 3;");
+    const reopened = createJournalStorage(sql.db); assert.deepEqual(await reopened.load(), initialData());
+    assert.equal(sql.native.prepare("PRAGMA user_version").get()?.user_version, 6);
     assert.equal(sql.native.prepare("SELECT name FROM sqlite_master WHERE name = 'sync_state'").get(), undefined);
     assert.equal(await reopened.sync.state(), null);
   } finally { sql.close(); }
@@ -228,21 +229,21 @@ test("same-identity activation preserves edits saved during enrollment", async (
     assert.ok((await store.sync.state())!.clock > advanced + 1);
   } finally { sql.close(); }
 });
-test("pre-migration backup failure leaves old storage and sync tables intact", async () => {
+test("failed fresh-start transaction keeps old journal and Sheets queue until retry", async () => {
   const sql = sqliteHarness();
   try {
     const data = historyFixture(1);
     sql.native.exec("CREATE TABLE app_state (id INTEGER PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE sync_state (id INTEGER); PRAGMA user_version = 1;");
     sql.native.prepare("INSERT INTO app_state VALUES (1, ?)").run(JSON.stringify(data));
-    let preserved = false;
-    const store = createJournalStorage(sql.db, { beforeMigration: async (snapshot) => {
-      assert.deepEqual(snapshot, data); if (!preserved) throw new Error("backup disk full");
-    } });
-    await assert.rejects(store.load(), /backup disk full/);
+    let backups = 0;
+    const store = createJournalStorage(sql.db, { beforeMigration: async () => { backups++; } });
+    await store.sync.state(); sql.failCommit();
+    await assert.rejects(store.load(), /commit failure/);
     assert.ok(sql.native.prepare("SELECT name FROM sqlite_master WHERE name='sync_state'").get());
     assert.equal(sql.native.prepare("PRAGMA user_version").get()?.user_version, 1);
-    preserved = true;
-    assert.deepEqual(await store.load(), data);
+    assert.deepEqual(await store.load(), initialData());
+    assert.equal(sql.native.prepare("SELECT name FROM sqlite_master WHERE name='sync_state'").get(), undefined);
+    assert.equal(backups, 0);
   } finally { sql.close(); }
 });
 

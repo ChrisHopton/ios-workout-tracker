@@ -14,9 +14,9 @@ const INSTALLATION_B = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const UID_A = "rules-phone-a";
 const UID_B = "rules-phone-b";
 const generation = (deviceId = DEVICE_A, generationId = GENERATION_A) => `devices/${deviceId}/generations/${generationId}`;
-const binding = (deviceId = DEVICE_A, generationId = GENERATION_A, installationId = INSTALLATION_A) => ({ schemaVersion: 1, deviceId, generationId, installationId });
+const binding = (deviceId = DEVICE_A, generationId = GENERATION_A, installationId = INSTALLATION_A) => ({ schemaVersion: 3, enabled: true, deviceId, generationId, installationId });
 const record = (revision = 1, source = "fixture", kind = "workout") => ({
-  schemaVersion: 1, deviceId: DEVICE_A, generationId: GENERATION_A, installationId: INSTALLATION_A,
+  schemaVersion: 2, deviceId: DEVICE_A, generationId: GENERATION_A, installationId: INSTALLATION_A,
   key: `${kind}:${DEVICE_A}:${source}`, kind, revision, deleted: false,
   payload: { title: "Literal = text", exercises: [{ id: "squat", targets: [1, 2, 3] }], optional: null },
 });
@@ -28,10 +28,10 @@ test("Firestore rules deny client reads and isolate authenticated upload namespa
   const environment = await initializeTestEnvironment({
     projectId: "demo-workout-sync", firestore: { host, port: Number(port), rules: readFileSync("firebase/firestore.rules", "utf8") },
   });
-  const phoneA = environment.authenticatedContext(UID_A).firestore();
-  const phoneB = environment.authenticatedContext(UID_B).firestore();
+  const phoneA = environment.authenticatedContext(UID_A, { firebase: { sign_in_provider: "anonymous", identities: {} } }).firestore();
+  const phoneB = environment.authenticatedContext(UID_B, { firebase: { sign_in_provider: "anonymous", identities: {} } }).firestore();
   const unsigned = environment.unauthenticatedContext().firestore();
-  const root = generation();
+  const root = `automaticUploads/${UID_A}`;
   const records = `${root}/records`;
   t.beforeEach(async () => {
     await environment.clearFirestore();
@@ -41,7 +41,10 @@ test("Firestore rules deny client reads and isolate authenticated upload namespa
       await store.doc(`uploadAuthorizations/${UID_B}`).set({ enabled: true, deviceId: DEVICE_B, generationId: GENERATION_B });
     });
   });
-  async function enroll() { await assertSucceeds(phoneA.doc(root).set(binding())); }
+  async function enroll() {
+    await environment.withSecurityRulesDisabled(async context => { await context.firestore().doc("uploadControl/automaticEnrollment").set({ enabled: true }); });
+    await assertSucceeds(phoneA.doc(root).set(binding()));
+  }
   try {
     await t.test("enrollment creates or repeats the exact immutable installation binding", async () => {
       await enroll();
@@ -117,7 +120,7 @@ test("Firestore rules deny client reads and isolate authenticated upload namespa
       await enroll();
       const value = record();
       for (const invalid of [
-        { ...value, schemaVersion: 2 }, { ...value, extra: true }, { ...value, revision: 0 },
+        { ...value, schemaVersion: 1 }, { ...value, extra: true }, { ...value, revision: 0 },
         { ...value, revision: 1.5 }, { ...value, revision: Number.MAX_SAFE_INTEGER + 1 },
         { ...value, deleted: "false" }, { ...value, payload: [1, 2] }, { ...value, kind: "unknown" },
         { ...value, deviceId: DEVICE_B }, { ...value, key: "different" },
@@ -128,10 +131,10 @@ test("Firestore rules deny client reads and isolate authenticated upload namespa
       }
       await assertFails(phoneA.doc(`${records}/completion`).set({ ...record(2), key: "completion", kind: "completion", payload: { initialUploadComplete: false } }));
     });
-    await t.test("disabling the registry immediately rejects existing authenticated contexts", async () => {
+    await t.test("disabling the binding immediately rejects existing authenticated contexts", async () => {
       await enroll();
       await environment.withSecurityRulesDisabled(async (context) => {
-        await context.firestore().doc(`uploadAuthorizations/${UID_A}`).update({ enabled: false });
+        await context.firestore().doc(root).update({ enabled: false });
       });
       const value = record();
       await assertFails(phoneA.doc(`${records}/${value.key}`).set(value));
@@ -172,7 +175,7 @@ test("Firestore rules deny client reads and isolate authenticated upload namespa
     const automaticB = environment.authenticatedContext(otherAutomaticUid, { firebase: { sign_in_provider: "anonymous", identities: {} } }).firestore();
     const automaticRoot = "automaticUploads/" + automaticUid;
     const automaticRecords = automaticRoot + "/records";
-    const automaticBinding = () => ({ ...binding(), schemaVersion: 2, enabled: true });
+    const automaticBinding = () => binding();
     const enrollmentControl = "uploadControl/automaticEnrollment";
     async function gate(enabled: boolean) {
       await environment.withSecurityRulesDisabled(async (context) => { await context.firestore().doc(enrollmentControl).set({ enabled }); });
@@ -212,7 +215,7 @@ test("Firestore rules deny client reads and isolate authenticated upload namespa
         { ...automaticBinding(), alias: "New alias" },
       ]) await assertFails(automaticA.doc(automaticRoot).set(changed));
       await assertFails(automaticA.doc(automaticRoot).delete());
-      await assertSucceeds(phoneA.doc(root).set(binding()));
+      await assertFails(phoneA.doc(generation()).set({ schemaVersion: 1, deviceId: DEVICE_A, generationId: GENERATION_A, installationId: INSTALLATION_A }));
     });
     await t.test("UID-scoped automatic namespaces remain isolated with identical UUIDs and no first-two cap", async () => {
       await enrollAutomatic();
@@ -254,7 +257,7 @@ test("Firestore rules deny client reads and isolate authenticated upload namespa
       for (const changed of [
         { ...value, deviceId: DEVICE_B }, { ...value, generationId: GENERATION_B },
         { ...value, installationId: INSTALLATION_B }, { ...value, revision: 0 },
-        { ...value, deleted: true }, { ...value, schemaVersion: 2 }, { ...value, extra: true },
+        { ...value, deleted: true }, { ...value, schemaVersion: 1 }, { ...value, extra: true },
       ]) await assertFails(automaticA.doc(path).set(changed));
       await assertSucceeds(automaticA.doc(path).set(value));
       for (const kind of UPLOAD_KINDS) {
@@ -310,6 +313,32 @@ test("Firestore rules deny client reads and isolate authenticated upload namespa
         assert.equal((await context.firestore().doc(automaticRecords + "/" + allowed.key).get()).exists, false);
         assert.equal((await context.firestore().collection(automaticRecords).get()).size, 10);
       });
+    });
+    await t.test("old releases cannot enroll or write even with live authentication and matching reset identity", async () => {
+      await gate(true);
+      await assertFails(automaticA.doc(automaticRoot).set({ ...binding(), schemaVersion: 2 }));
+      await assertFails(phoneA.doc(generation()).set({ schemaVersion: 1, deviceId: DEVICE_A, generationId: GENERATION_A, installationId: INSTALLATION_A }));
+      await assertFails(phoneA.doc(generation() + "/records/" + record().key).set({ ...record(), schemaVersion: 1 }));
+      await environment.withSecurityRulesDisabled(async context => {
+        await context.firestore().doc(automaticRoot).set({ ...binding(), schemaVersion: 2 });
+      });
+      await assertFails(automaticA.doc(automaticRecords + "/" + record().key).set(record()));
+      await assertFails(automaticA.doc(automaticRoot).set(binding()));
+      await environment.withSecurityRulesDisabled(async context => { await context.firestore().doc(automaticRoot).delete(); });
+      const nextBinding = { ...binding(), generationId: GENERATION_B, installationId: INSTALLATION_B };
+      await assertSucceeds(automaticA.doc(automaticRoot).set(nextBinding));
+      await assertFails(automaticA.doc(automaticRecords + "/" + record().key).set(record()));
+      const nextRecord = { ...record(), generationId: GENERATION_B, installationId: INSTALLATION_B };
+      await assertFails(automaticA.doc(automaticRecords + "/" + record().key).set({ ...nextRecord, schemaVersion: 1 }));
+      await assertSucceeds(automaticA.doc(automaticRecords + "/" + record().key).set(nextRecord));
+    });
+    await t.test("old revoked roots remain an enrollment tombstone after their records are purged", async () => {
+      await gate(true);
+      await environment.withSecurityRulesDisabled(async context => {
+        await context.firestore().doc(automaticRoot).set({ ...binding(), schemaVersion: 2, enabled: false });
+      });
+      await assertFails(automaticA.doc(automaticRoot).set(binding()));
+      await assertFails(automaticA.doc(automaticRecords + "/" + record().key).set(record()));
     });
   } finally { await environment.cleanup(); }
 });

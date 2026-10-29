@@ -100,7 +100,7 @@ test("browser bootstrap uploads initial history and incremental edits entirely t
     assert.equal(await bootstrap(() => true), true);
     const credentials = await loadCredentials();
     assert.ok(credentials);
-    assert.equal(validateCredentials(credentials).version, 2);
+    assert.equal(validateCredentials(credentials).version, 3);
     assert.deepEqual(Object.keys(credentials).sort(), [
       "apiKey", "deviceId", "generationId", "layout", "projectId", "refreshToken", "uid", "version",
     ]);
@@ -141,7 +141,7 @@ test("browser bootstrap uploads initial history and incremental edits entirely t
 
     const requestCount = requests.length;
     const initialProfile = initialChanges.find((change) => change.kind === "profile")!;
-    await writeData({ ...history, settings: { ...history.settings, gender: "female" } });
+    await writeData({ ...history, settings: { ...history.settings, gender: "Female" } });
     assert.equal(await syncRepository.pendingCount(), 1);
     controller.changed();
     await completeScheduledSync(controller, scheduler);
@@ -153,14 +153,14 @@ test("browser bootstrap uploads initial history and incremental edits entirely t
     assert.equal(incremental[0].changes.length, 1);
     const profile = incremental[0].changes[0];
     assert.equal(profile.kind, "profile");
-    assert.equal(profile.payload.gender, "female");
+    assert.equal(profile.payload.gender, "Female");
     assert.equal(profile.key, initialProfile.key);
     assert.ok(profile.revision > initialProfile.revision);
     assert.equal(controller.getSnapshot().status, "synced");
     assert.equal(controller.getSnapshot().initialComplete, true);
     assert.equal(controller.getSnapshot().pending, 0);
     assert.equal(controller.getSnapshot().lastSyncedAt, new Date(scheduler.now).toISOString());
-    assert.equal((await loadData()).settings.gender, "female");
+    assert.equal((await loadData()).settings.gender, "Female");
     assert.equal(scheduler.jobs.size, 0);
     assert.equal(fetchCalls, 0);
   } finally {
@@ -168,6 +168,28 @@ test("browser bootstrap uploads initial history and incremental edits entirely t
     await removeCredentials();
     globalThis.fetch = originalFetch;
     if (storageDescriptor) Object.defineProperty(globalThis, "localStorage", storageDescriptor);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
+
+
+test("browser fresh start removes old content once and preserves the new journal", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const storage = new MemoryStorage();
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+  try {
+    storage.setItem("workout-browser-preview-v1", "old or corrupt personal journal");
+    storage.setItem("workout-browser-before-v1-to-v2", "private recovery copy");
+    const fresh = await loadData();
+    assert.equal(fresh.schemaVersion, 3); assert.equal(fresh.sessions.length, 0); assert.equal(fresh.settings.firstName, "");
+    assert.equal(storage.getItem("workout-browser-preview-v1"), null);
+    assert.equal(storage.getItem("workout-browser-before-v1-to-v2"), null);
+    const updated = { ...fresh, settings: { ...fresh.settings, firstName: "New profile" } };
+    await writeData(updated); assert.deepEqual(await loadData(), updated);
+    storage.removeItem("workout-browser-preview-v3");
+    await assert.rejects(loadData(), /journal is missing/);
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "localStorage", descriptor);
     else Reflect.deleteProperty(globalThis, "localStorage");
   }
 });

@@ -164,7 +164,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           <>
             <Txt bold>Unable to open your workouts</Txt>
             <Txt>{loadError}</Txt>
-            <Txt muted>Your existing data has not been replaced.</Txt>
+            <Txt muted>Please try opening the app again.</Txt>
             <Button title="Try again" onPress={() => void load()} />
           </>
         ) : (
