@@ -10,6 +10,8 @@ The native adapter now converts failures to fixed diagnostic messages and codes 
 
 Validation: 334 application tests passed, zero failed, one emulator-only skip. Six new regressions cover native production-provider configuration, signup gating, timeout/late completion, empty tokens, safe diagnostic presentation and transport preservation. Physical phone result is still required; these mocked native tests do not establish App Attest acceptance.
 
+TypeScript and Expo lint passed. EAS completed the production iOS export and published the diagnostic OTA from commit `0b5be1313df80929e92a6eb3bf23fc0a02444bc6` to preview with matching runtime `fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06`. Update group: `2642e1a5-4b6b-4a5c-a6b2-dd2c43aa8898`; iOS update: `01a185cf-bc74-7605-8680-57e18cba43fc`. The primary phone's new AT- code is pending. No server permissions or enforcement changed in this investigation.
+
 ## Simpler screens and upload diagnostics — October 26, 2026
 
 Home now has one date header, a selectable week strip, one Plans entry, and one workout action. Analytics has two totals, a weekly workout chart, recent exercises and focused detail routes. Settings keeps save feedback and exposes upload diagnostics only when the Uploads row is expanded.
