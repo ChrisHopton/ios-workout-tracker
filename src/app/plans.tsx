@@ -12,7 +12,8 @@ import {
 } from "../components/ui";
 import { useApp } from "../data/store";
 import { formatDate, today } from "../domain/dates";
-import { nextOccurrence, recurrenceLabel } from "../domain/schedule";
+import { nextOccurrence, planEditEffectiveDate, recurrenceLabel } from "../domain/schedule";
+import { routineAt } from "../domain/routine";
 import { WEEKDAYS } from "../domain/types";
 import { SaveIndicator } from "../components/SaveIndicator";
 
@@ -21,14 +22,31 @@ export default function WorkoutPlans() {
   const colors = useTheme();
   const active = data.templates.filter((plan) => !plan.archived);
   const date = today();
+  const routine = routineAt(data, date);
+  const editDate = planEditEffectiveDate(data, date);
+  const plannedRoutine = routineAt(data, editDate);
+  const flexible = plannedRoutine.mode === "flexible";
   return (
     <Screen>
       <Txt bold style={styles.heading}>
         Your routine, in one place.
       </Txt>
       <Txt muted>
-        Create a plan, edit your exercises, or choose when each workout repeats.
+        Create a plan, edit your exercises, or choose how your workouts repeat.
       </Txt>
+      <Card>
+        <SectionTitle>Routine</SectionTitle>
+        <Txt bold>{routine.mode === "flexible" ? "Flexible sequence" : "Fixed schedule"}</Txt>
+        <Txt muted>
+          {routine.mode === "flexible"
+            ? routine.weekdays.map((day) => WEEKDAYS[day]).join(", ") + " · Workouts stay in order, even after a missed day."
+            : "Plans repeat weekly or every two weeks on fixed dates."}
+        </Txt>
+        {editDate > date && (
+          <Txt muted>Scheduled from {formatDate(editDate)}: {flexible ? "Flexible sequence" : "Fixed schedule"}.</Txt>
+        )}
+        <Button title="Edit routine" secondary onPress={() => router.push("/routine")} />
+      </Card>
       <Button title="+ New plan" onPress={() => router.push("/editor")} />
       <Row style={styles.section}>
         <SectionTitle>Current plans</SectionTitle>
@@ -41,13 +59,15 @@ export default function WorkoutPlans() {
           <Ionicons name="barbell-outline" color={colors.accent} size={32} />
           <Txt bold>Build your first workout</Txt>
           <Txt muted>
-            Choose exercises and rep targets, then schedule it weekly or every
-            two weeks. You can also keep a plan on demand.
+            Choose exercises and rep targets, then add the plan to your routine.
+            You can also keep a plan on demand.
           </Txt>
         </Card>
       )}
       {active.map((plan) => {
         const next = nextOccurrence(data, plan.id, date);
+        const sequenceCount = plannedRoutine.mode === "flexible"
+          ? plannedRoutine.sequence.filter((id) => id === plan.id).length : 0;
         const sets = plan.exercises.reduce(
           (sum, exercise) => sum + exercise.sets,
           0,
@@ -63,12 +83,14 @@ export default function WorkoutPlans() {
               </View>
             </Row>
             <Txt bold style={{ color: colors.accent }}>
-              {recurrenceLabel(plan)}
+              {flexible ? sequenceCount ? "In flexible sequence" : "On demand" : recurrenceLabel(plan)}
             </Txt>
             <Txt muted>
-              {plan.weekdays.length
-                ? plan.weekdays.map((day) => WEEKDAYS[day]).join(", ")
-                : "On demand"}
+              {flexible
+                ? sequenceCount ? sequenceCount + (sequenceCount === 1 ? " entry per cycle" : " entries per cycle") : "Add this plan in Edit routine."
+                : plan.weekdays.length
+                  ? plan.weekdays.map((day) => WEEKDAYS[day]).join(", ")
+                  : "On demand"}
             </Txt>
             <Txt muted style={styles.small}>
               {next
@@ -77,7 +99,7 @@ export default function WorkoutPlans() {
                     month: "short",
                     day: "numeric",
                   })}`
-                : "Choose this plan manually on a rest day."}
+                : flexible && sequenceCount ? "Dates move with your routine." : "Choose this plan manually on a rest day."}
             </Txt>
             <Button
               title={`Edit ${plan.title}`}

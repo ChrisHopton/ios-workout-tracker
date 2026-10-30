@@ -1,6 +1,13 @@
-const LEGACY_INCREMENT_INSTRUCTION = "The configured increment would exceed 10%; choose a smaller increment in Settings.";
-const INCREMENT_HOLD_EXPLANATION = "Automatic changes are paused to keep weight steps within 10% of your current load.";
+import { SessionExercise, Unit } from "../domain/types";
 
-export function suggestionReasonForDisplay(reason: string): string {
-  return reason.replace(LEGACY_INCREMENT_INSTRUCTION, INCREMENT_HOLD_EXPLANATION);
+export function nextStepForDisplay(item: SessionExercise, unit: Unit): string {
+  const target = `${item.target.sets} sets × ${item.target.repMin}–${item.target.repMax} reps`;
+  if (item.exercise.equipment === "bodyweight") return target;
+  const weights = item.suggestion.weights;
+  if (!weights.length || weights.some((value) => value === null))
+    return `Choose a starting weight · ${target}`;
+  const loads = [...new Set(weights)].map((value) => String(value));
+  return loads.length === 1
+    ? `${loads[0]} ${unit} · ${target}`
+    : `${weights.join(" / ")} ${unit} · ${target}`;
 }

@@ -2,7 +2,8 @@ import { FRESH_START_EPOCH } from "../sync/reset";
 import { validateBootstrap, type BootstrapDraft } from "../sync/bootstrap";
 import type { AppData } from "../domain/types";
 import { initialData } from "../domain/library";
-import { upgradeData } from "../domain/backup";
+import { snapshot } from "./snapshot";
+import { upgradeData, validateStoredData, type StoredAppData } from "../domain/backup";
 import { changedRows, makeProfileDocument, makeCompletionDocument, projectData } from "../sync/projection";
 import type { SyncLocalState, SyncRepository } from "../sync/controller";
 import { makeBatch, sameIdentity, type DocumentChange, type UploadBatch, type UploadDocument } from "../sync/protocol";
@@ -32,19 +33,34 @@ export async function loadData(): Promise<AppData> {
   }
   const value = localStorage.getItem(dataKey);
   if (!value) throw new Error("The browser preview journal is missing.");
-  priorData = upgradeData(JSON.parse(value));
-  return priorData;
+  const stored = validateStoredData(JSON.parse(value));
+  const next = snapshot(upgradeData(stored));
+  if (stored.schemaVersion !== 4) {
+    const recoveryKey = "workout-browser-before-v" + stored.schemaVersion + "-to-v4";
+    const recovery = localStorage.getItem(recoveryKey);
+    if (recovery !== null) {
+      if (validateStoredData(JSON.parse(recovery)).schemaVersion !== stored.schemaVersion)
+        throw new Error("The browser recovery copy needs attention.");
+    } else localStorage.setItem(recoveryKey, value);
+    persist(next, stored);
+  } else priorData = next;
+  return next;
 }
-export async function writeData(data: AppData): Promise<void> {
+function persist(data: AppData, before: StoredAppData | null) {
+  const changes = syncState?.enabled && before
+    ? changedRows(projectData(before, syncState.deviceId, syncState.label), projectData(data, syncState.deviceId, syncState.label)) : [];
+  const revision = syncState && changes.length ? syncState.clock + 1 : null;
+  if (revision !== null && !Number.isSafeInteger(revision)) throw new Error("The preview upload revision needs attention.");
+  // Compute and validate the upload delta before the only durable browser write.
   localStorage.setItem(dataKey, JSON.stringify(data));
-  if (syncState?.enabled && priorData) {
-    const changes = changedRows(projectData(priorData, syncState.deviceId, syncState.label), projectData(data, syncState.deviceId, syncState.label));
-    if (changes.length) {
-      const revision = ++syncState.clock;
-      changes.forEach((doc) => { outbox.set(doc.key, { ...doc, revision }); if (!doc.deleted) known.set(doc.key, doc); });
-    }
+  if (syncState && revision !== null) {
+    syncState.clock = revision;
+    changes.forEach(doc => { outbox.set(doc.key, { ...doc, revision }); if (!doc.deleted) known.set(doc.key, doc); });
   }
   priorData = data;
+}
+export async function writeData(data: AppData): Promise<void> {
+  persist(snapshot(data, priorData ?? undefined), priorData);
 }
 export const syncRepository: SyncRepository = {
   prepareBootstrap: async (candidate) => { bootstrap ??= validateBootstrap(candidate); return { ...bootstrap }; },

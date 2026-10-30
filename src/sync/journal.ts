@@ -1,6 +1,7 @@
 import { FRESH_START_EPOCH, validateResetIntent, type ResetIntent } from "./reset";
 import type { Connection, JournalDatabase } from "../data/journalStorage";
 import { validateBootstrap, type BootstrapDraft } from "./bootstrap";
+import type { StoredAppData } from "../domain/backup";
 import type { AppData } from "../domain/types";
 import type { SyncLocalState } from "./controller";
 import { changedRows, makeProfileDocument, projectData, projectMetadata, projectSession, makeCompletionDocument } from "./projection";
@@ -167,13 +168,14 @@ export function createSyncJournal(db: JournalDatabase) {
     state.clock = revision;
     await storeState(connection, state);
   }
-  async function capture(connection: Connection, before: AppData | undefined, after: AppData) {
+  async function capture(connection: Connection, before: StoredAppData | undefined, after: AppData) {
     const current = await readState(connection, "upload_state", "ignore");
     if (!current?.enabled) return;
     const oldDocs: UploadDocument[] = [];
     const newDocs: UploadDocument[] = [];
-    if (!before || before.settings !== after.settings || before.bodyWeights !== after.bodyWeights || before.exercises !== after.exercises ||
-      before.templates !== after.templates || before.scheduleRevisions !== after.scheduleRevisions) {
+    if (!before || before.settings !== after.settings || (!("bodyWeights" in before) || before.bodyWeights !== after.bodyWeights) || before.exercises !== after.exercises ||
+      before.templates !== after.templates || before.scheduleRevisions !== after.scheduleRevisions ||
+      !("routineProgress" in before) || before.routineProgress !== after.routineProgress) {
       if (before) oldDocs.push(...projectMetadata(before, current.deviceId, current.label));
       newDocs.push(...projectMetadata(after, current.deviceId, current.label));
     }

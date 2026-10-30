@@ -13,6 +13,11 @@ function largeLegacyJournal() {
   data.schemaVersion = 1;
   data.settings = { age: "", gender: "", heightCm: null, unit: "lb" };
   delete data.bodyWeights;
+  delete data.routineProgress;
+  for (const session of data.sessions) {
+    delete session.hasFinished;
+    delete session.routineOccurrence;
+  }
   for (const session of data.sessions) for (const entry of session.exercises) {
     delete entry.suggestion.algorithmVersion;
     for (const set of entry.sets) delete set.classification;
@@ -54,7 +59,7 @@ test("large old journals reset without making recovery copies or relaxing portab
         const result = await store.load();
         assert.deepEqual(result, initialData());
         assert.equal(backups, 0);
-        assert.equal(sql.native.prepare("PRAGMA user_version").get()!.user_version, 6);
+        assert.equal(sql.native.prepare("PRAGMA user_version").get()!.user_version, 7);
         assert.deepEqual(await createJournalStorage(sql.db).load(), result);
       } finally { sql.close(); }
     });

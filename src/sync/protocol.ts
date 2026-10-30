@@ -2,7 +2,7 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObj
 export interface JsonObject { [key: string]: JsonValue; }
 export const UPLOAD_KINDS = [
   "profile", "body_weight", "exercise", "plan", "schedule", "schedule_template", "workout",
-  "workout_exercise", "completion",
+  "workout_exercise", "schedule_progress", "completion",
 ] as const;
 export type UploadKind = (typeof UPLOAD_KINDS)[number];
 export interface UploadDocument {

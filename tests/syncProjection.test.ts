@@ -40,7 +40,7 @@ function fixture(): AppData {
   };
   const session: WorkoutSession = {
     id: "session:old/🧪", date: "2025-03-09", title: "Old title", templateId: template.id,
-    unit: "kg", status: "in_progress", startedAt: timestamp, updatedAt: timestamp, finishedAt: null,
+    unit: "kg", status: "in_progress", hasFinished: false, routineOccurrence: null, startedAt: timestamp, updatedAt: timestamp, finishedAt: null,
     exercises: [
       {
         exercise: { id: "exercise:one/日本", name: "Historical lift", group: "Back", equipment: "barbell", incrementLb: 10, incrementKg: 5 },
@@ -57,14 +57,14 @@ function fixture(): AppData {
     ],
   };
   return {
-    schemaVersion: 3, bodyWeights: [], settings: { ...initialData().settings, firstName: "+literal name", gender: "Male", heightCm: 181.5, unit: "lb" },
+    schemaVersion: 4, routineProgress: [], bodyWeights: [], settings: { ...initialData().settings, firstName: "+literal name", gender: "Male", heightCm: 181.5, unit: "lb" },
     exercises: [
       { ...session.exercises[0].exercise, name: "Current lift", incrementLb: 5, incrementKg: 2.5 },
       { ...session.exercises[1].exercise, name: "Current push-up" },
     ],
     templates: [template, unused],
     scheduleRevisions: [{
-      id: "revision:old", effectiveDate: "2025-03-09", anchorMonday: "2025-03-03",
+      id: "revision:old", routine: { mode: "fixed" }, effectiveDate: "2025-03-09", anchorMonday: "2025-03-03",
       slots: [{ weekday: 6, workoutIds: [template.id, template.id] }, { weekday: 0, workoutIds: [null, null] }],
       templates: [{ ...template, title: "Historical plan", exercises: [{ ...template.exercises[0], sets: 4 }] }, unused],
     }],
@@ -90,17 +90,17 @@ function worstCaseFixture(): AppData {
   };
   const session: WorkoutSession = {
     id: "語".repeat(100), date: "2025-03-09", title: "界".repeat(120), templateId: template.id,
-    unit: "lb", status: "completed", startedAt: timestamp, updatedAt: timestamp, finishedAt: timestamp,
+    unit: "lb", status: "completed", hasFinished: true, routineOccurrence: null, startedAt: timestamp, updatedAt: timestamp, finishedAt: timestamp,
     exercises: exercises.map((exercise, index) => ({
       exercise, target: template.exercises[index], suggestion: { algorithmVersion: 1, weights: Array.from({ length: 30 }, () => 100000), reason: "界".repeat(2000) },
       sets: Array.from({ length: 30 }, () => ({ classification: "working" as const, weight: "9999.12345678901", reps: "0000000000000999", status: "completed" as const })),
     })),
   };
   const data: AppData = {
-    schemaVersion: 3, bodyWeights: [], settings: { ...initialData().settings, firstName: "界".repeat(80), gender: "Female", heightCm: 300, unit: "kg" },
+    schemaVersion: 4, routineProgress: [], bodyWeights: [], settings: { ...initialData().settings, firstName: "界".repeat(80), gender: "Female", heightCm: 300, unit: "kg" },
     exercises, templates: [template], sessions: [session],
     scheduleRevisions: [{
-      id: "史".repeat(100), effectiveDate: "2025-03-09", anchorMonday: "2025-03-03",
+      id: "史".repeat(100), routine: { mode: "fixed" }, effectiveDate: "2025-03-09", anchorMonday: "2025-03-03",
       slots: Array.from({ length: 7 }, (_, weekday) => ({ weekday, workoutIds: [template.id, template.id] })),
       templates: [structuredClone(template), { ...structuredClone(template), id: "unused", archived: true }],
     }],

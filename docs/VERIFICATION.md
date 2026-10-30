@@ -1,5 +1,29 @@
 # Verification report
 
+## Simpler recording and flexible scheduling — current verification record
+
+Verified on Windows, October 29, 2026 (October 30 UTC). Physical-phone acceptance remains pending on each phone. Earlier dated release records below are unchanged.
+
+Scope: fixed/flexible routine selection, completion/skip progress, make-up handling, one-time suggested-weight autofill, and protected cancellation/date movement. SQLite 7 / journal format 4 migration preserves existing journal data, internal recovery copies and upload identity; older sessions are protected against cancellation/date movement because prior completion cannot be reliably inferred. Firestore adds the schedule_progress kind without changing credential/enrollment/record versions or allowing reads. See [feature and migration guidance](SIMPLER_RECORDING.md).
+
+| Check | Result / evidence |
+| --- | --- |
+| Final source commit | Pending |
+| Full application suite | `npm test`: 441 passed, zero failed, one emulator-only skip (442 total) |
+| TypeScript and ESLint | Full `tsc --noEmit` and `eslint . --no-cache` passed |
+| Firestore emulator | 23 passed: schedule_progress ownership/identity, denied reads, exact retries, stale revisions, atomic failures and legacy rejection |
+| Expo dependency check / Doctor | 20/21 Doctor checks pass; existing patch warnings for expo 57.0.29, router 57.0.27 and sharing 57.0.23 remain. No dependency or native changes |
+| Production iOS export | Passed; Hermes 3,344,199 bytes, complete export 3,758,736 bytes; +61,629 bytes versus prior minimal Analytics release |
+| Recording / migration performance | 1,000-workout synthetic SQLite: local edit median 0.660 ms; queued edit 0.797 ms. Validation with 100/500 schedule revisions: 0.501/0.595 ms. Desktop measurements, not iPhone latency |
+| Runtime fingerprint and compatible signed preview build | `fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06`; matches finished build `00474cfc-0dd6-45d3-ada1-f19e7e2b7e3a` |
+| Synthetic browser checks | 375/393/440 px widths, dark mode, no horizontal overflow and 44-point new controls; autofill once, cleared-weight restart, Save and leave, missing-set cancel, confirmed draft cancellation, cross-date resume, seeded order/preview/save, discard protection and selected radio state verified. Uploads mocked; native keyboard, larger text, light mode and VoiceOver pending |
+| Firestore rules deployment | Firebase CLI compiled and released rules to workout-bb5a2 on October 30 UTC. Only schedule_progress allowlist addition; no gate, identity, enforcement, billing or data changes |
+| Preview EAS update group / iOS update ID | Pending |
+| First iPhone activation | Pending: installed update, preserved journal/identity, native checks and uploads |
+| Second iPhone activation | Pending independently; an offline phone is not verified by the first phone |
+
+No reinstall, current-journal reset or cloud download is part of this upgrade. The existing profile-cutover epoch remains unchanged; a phone that never activated that earlier release still completes its previously approved one-time cutover. Use the [device checklist](DEVICE_CHECKLIST.md) and preserve private values outside this report.
+
 ## Minimal Analytics and automatic weight steps — October 29, 2026
 
 Replaced recent exercises and detail navigation with the latest completed workout by recorded date and a three-chart carousel: weekly working-load volume, weekly workout counts, and completed working sets by muscle group. Removed comparison screens, benchmark tables/generation tooling and manual increment controls. Existing saved/imported step sizes and recommendation calculations remain unchanged; only obsolete Settings instructions are normalized at display time. SQLite remains 6, journal/backup format 3, and Firestore contracts and private upload identities are unchanged.

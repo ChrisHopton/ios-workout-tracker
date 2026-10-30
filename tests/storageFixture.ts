@@ -12,7 +12,7 @@ export function historyFixture(count = 1000): AppData {
     title: "Full body",
     templateId: "plan",
     unit: "lb",
-    status: "completed",
+    status: "completed", hasFinished: true, routineOccurrence: null,
     startedAt: "2020-01-01T12:00:00.000Z",
     updatedAt: "2020-01-01T12:00:00.000Z",
     finishedAt: "2020-01-01T12:00:00.000Z",
@@ -126,7 +126,7 @@ export function scheduleHistoryFixture(revisions: number, workouts = 1000): AppD
   }));
   data.scheduleRevisions = Array.from({ length: revisions }, (_, index) => ({
     id: "revision-" + index, effectiveDate: addDays("2020-01-01", index),
-    anchorMonday: "2019-12-30",
+    anchorMonday: "2019-12-30", routine: { mode: "fixed" },
     slots: data.templates.map((plan, weekday) => ({ weekday, workoutIds: [plan.id, plan.id] })),
     templates: structuredClone(data.templates),
   }));

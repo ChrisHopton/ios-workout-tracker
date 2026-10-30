@@ -37,6 +37,7 @@ function session(
   weight = "100",
 ): WorkoutSession {
   return {
+    hasFinished: true, routineOccurrence: null,
     id: date,
     date,
     title: plan.title,

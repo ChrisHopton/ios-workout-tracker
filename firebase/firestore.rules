@@ -12,7 +12,7 @@ service cloud.firestore {
         && data.schemaVersion == 2 && data.deviceId == deviceId && data.generationId == generationId
         && uuid(deviceId) && uuid(generationId) && uuid(data.installationId)
         && data.key == key && key.size() > 0 && key.size() <= 1500
-        && data.kind in ['profile', 'body_weight', 'exercise', 'plan', 'schedule', 'schedule_template', 'workout', 'workout_exercise', 'completion']
+        && data.kind in ['profile', 'body_weight', 'exercise', 'plan', 'schedule', 'schedule_template', 'workout', 'workout_exercise', 'schedule_progress', 'completion']
         && data.revision is int && data.revision > 0 && data.revision <= 9007199254740991
         && data.deleted is bool && data.payload is map
         && (data.deleted == false || data.payload.size() == 0)

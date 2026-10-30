@@ -27,6 +27,7 @@ import {
   today,
 } from "../domain/dates";
 import { loadLabel } from "../domain/library";
+import { routineAt } from "../domain/routine";
 import {
   archiveTemplate,
   planEditEffectiveDate,
@@ -102,10 +103,12 @@ export default function WorkoutEditor() {
     null,
   );
   const busyRef = useRef(false);
+  const pendingDestination = useRef<"/plans" | "/routine">("/plans");
   const [dirty, setDirty] = useState(false);
   const date = today();
   const effectiveDate = planEditEffectiveDate(data, date);
   const futureChanges = effectiveDate > date;
+  const flexibleRoutine = routineAt(data, effectiveDate).mode === "flexible";
   const effectiveDateLabel = formatDate(effectiveDate, { month: "long", day: "numeric", year: "numeric" });
   const previewStart = mondayOf(effectiveDate);
   const selectedIds = new Set(exercises.map((item) => item.exerciseId));
@@ -160,14 +163,18 @@ export default function WorkoutEditor() {
     router.dismissTo("/plans");
   }
   function cancel() {
+    requestLeave("/plans");
+  }
+  function requestLeave(destination: "/plans" | "/routine") {
     if (busyRef.current) return;
+    pendingDestination.current = destination;
     Keyboard.dismiss();
     if (pendingCommit) {
       setConfirmation("unsaved");
       return;
     }
     if (!dirty) {
-      leave();
+      router.dismissTo(destination);
       return;
     }
     setConfirmation("discard");
@@ -386,7 +393,9 @@ export default function WorkoutEditor() {
           {initial ? "Make it your own." : "A plan to come back to."}
         </Txt>
         <Txt muted>
-          Choose your exercises, training days, and how often this plan repeats.
+          {flexibleRoutine
+            ? "Choose exercises and rep targets. Your routine controls workout days and order."
+            : "Choose your exercises, training days, and how often this plan repeats."}
         </Txt>
         {futureChanges && (
           <Txt bold>Changes take effect {effectiveDateLabel}.</Txt>
@@ -404,6 +413,15 @@ export default function WorkoutEditor() {
             }}
             returnKeyType="done"
           />
+          <Button title="Manage routine" secondary disabled={busy || !!pendingCommit}
+            onPress={() => requestLeave("/routine")} />
+          {flexibleRoutine ? (
+            <Txt muted style={styles.small}>
+              Edit training days and the repeating order in Manage routine.
+              New plans can be added to the sequence after saving.
+            </Txt>
+          ) : (
+            <>
           <Txt bold>Repeat</Txt>
           <View style={styles.chips}>
             <Chip
@@ -494,6 +512,8 @@ export default function WorkoutEditor() {
               ? "One workout per day. Plans every two weeks can share a day in opposite weeks."
               : "No days selected: keep this as an on-demand workout."}
           </Txt>
+            </>
+          )}
           {preview.error && exercises.length > 0 && (
             <Txt style={{ color: colors.danger }}>{preview.error}</Txt>
           )}
@@ -633,6 +653,7 @@ export default function WorkoutEditor() {
             setCustomError(null);
           }}
         />
+        {!flexibleRoutine && <>
         <SectionTitle>{futureChanges ? "Upcoming two weeks" : "This week & next"}</SectionTitle>
         {preview.error ? (
           <Card>
@@ -704,6 +725,7 @@ export default function WorkoutEditor() {
             </>
           )
         )}
+        </>}
         <Txt muted style={styles.small}>
           {futureChanges
             ? "Changes take effect " + effectiveDateLabel + ". "
@@ -781,7 +803,7 @@ export default function WorkoutEditor() {
                     const action = confirmation;
                     setConfirmation(null);
                     if (action === "archive") void archive();
-                    else leave();
+                    else router.dismissTo(pendingDestination.current);
                   }}
                 />
               )}

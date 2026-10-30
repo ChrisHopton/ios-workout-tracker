@@ -71,7 +71,24 @@ export interface ScheduleSlot {
   weekday: number;
   workoutIds: (string | null)[];
 }
+export type RoutineSchedule =
+  | { mode: "fixed" }
+  | { mode: "flexible"; id: string; weekdays: number[]; sequence: string[]; startIndex: number; startDate: string };
+export interface RoutineOccurrence {
+  routineId: string;
+  ordinal: number;
+  templateId: string;
+  dueDate: string;
+}
+export interface RoutineProgress extends RoutineOccurrence {
+  id: string;
+  resolvedDate: string;
+  resolvedAt: string;
+  outcome: "completed" | "skipped";
+  sessionId: string | null;
+}
 export interface ScheduleRevision {
+  routine: RoutineSchedule;
   id: string;
   effectiveDate: string;
   anchorMonday: string;
@@ -96,6 +113,8 @@ export interface SessionExercise {
   sets: RecordedSet[];
 }
 export interface WorkoutSession {
+  hasFinished: boolean;
+  routineOccurrence: RoutineOccurrence | null;
   id: string;
   date: string;
   title: string;
@@ -108,12 +127,13 @@ export interface WorkoutSession {
   exercises: SessionExercise[];
 }
 export interface AppData {
-  schemaVersion: 3;
+  schemaVersion: 4;
   settings: ProfileSettings;
   bodyWeights: BodyWeightEntry[];
   exercises: ExerciseDefinition[];
   templates: WorkoutTemplate[];
   scheduleRevisions: ScheduleRevision[];
+  routineProgress: RoutineProgress[];
   sessions: WorkoutSession[];
 }
 export type SaveStatus = "saved" | "saving" | "error";

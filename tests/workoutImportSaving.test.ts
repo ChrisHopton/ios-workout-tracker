@@ -19,7 +19,7 @@ function fixture(): WorkoutImport {
     exercises: [exercise], templates: [plan],
     sessions: [{
       id: "synthetic-import-workout", date: "2026-10-01", title: plan.title, templateId: plan.id,
-      unit: "lb", status: "completed", startedAt: at, updatedAt: at, finishedAt: at,
+      unit: "lb", status: "completed", hasFinished: true, routineOccurrence: null, startedAt: at, updatedAt: at, finishedAt: at,
       exercises: [{ exercise, target, suggestion: { algorithmVersion: 2, weights: [null], reason: "Imported recorded values" },
         sets: [{ classification: "working", weight: "40", reps: "10", status: "completed" }] }],
     }],
@@ -76,7 +76,7 @@ test("an import merged after preview retains newer profile, measurement and hist
   const beforePicker = snapshot(initialData());
   const initialPreview = previewWorkoutImport(beforePicker, source, date);
   assert.equal(initialPreview.workoutsAdded, 1);
-  const recentHistory = { ...source.sessions[0], id: "existing-local-workout", date: "2026-10-02" };
+  const recentHistory = { ...source.sessions[0], hasFinished: true, routineOccurrence: null, id: "existing-local-workout", date: "2026-10-02" };
   const latest = snapshot({
     ...beforePicker,
     settings: { ...beforePicker.settings, firstName: "Updated locally", unit: "kg" },

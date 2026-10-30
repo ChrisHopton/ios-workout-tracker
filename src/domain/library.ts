@@ -51,12 +51,13 @@ export const EXERCISE_LIBRARY: ExerciseDefinition[] = entries.map(
 );
 export function initialData(): AppData {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     settings: emptyProfileSettings(),
     bodyWeights: [],
     exercises: EXERCISE_LIBRARY.map((e) => ({ ...e })),
     templates: [],
     scheduleRevisions: [],
+    routineProgress: [],
     sessions: [],
   };
 }

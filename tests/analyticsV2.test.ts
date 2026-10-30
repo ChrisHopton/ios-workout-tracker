@@ -14,7 +14,7 @@ function set(weight: string, reps: string, classification: RecordedSet["classifi
 }
 function session(data: AppData, date: string, sets: RecordedSet[], equipment: Equipment = "barbell"): WorkoutSession {
   return {
-    id: date, date, title: "Strength", templateId: "strength", unit: "kg", status: "completed",
+    hasFinished: true, routineOccurrence: null, id: date, date, title: "Strength", templateId: "strength", unit: "kg", status: "completed",
     startedAt: date + "T12:00:00Z", updatedAt: date + "T13:00:00Z", finishedAt: date + "T13:00:00Z",
     exercises: [{ exercise: { ...data.exercises[0], equipment }, target: { exerciseId: data.exercises[0].id, sets: sets.length, repMin: 8, repMax: 12 },
       suggestion: { algorithmVersion: 2, weights: sets.map(() => null), reason: "" }, sets }],

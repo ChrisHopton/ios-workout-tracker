@@ -192,7 +192,7 @@ test("old Sheets journal resets with its queue state in the same transaction", a
     const store = createJournalStorage(sql.db); await store.load(); const data = historyFixture(2); await store.write(data);
     sql.native.exec("CREATE TABLE sync_state (id INTEGER PRIMARY KEY, device_id TEXT); CREATE TABLE sync_rows (key TEXT); CREATE TABLE sync_outbox (key TEXT); DELETE FROM app_lifecycle; PRAGMA user_version = 3;");
     const reopened = createJournalStorage(sql.db); assert.deepEqual(await reopened.load(), initialData());
-    assert.equal(sql.native.prepare("PRAGMA user_version").get()?.user_version, 6);
+    assert.equal(sql.native.prepare("PRAGMA user_version").get()?.user_version, 7);
     assert.equal(sql.native.prepare("SELECT name FROM sqlite_master WHERE name = 'sync_state'").get(), undefined);
     assert.equal(await reopened.sync.state(), null);
   } finally { sql.close(); }

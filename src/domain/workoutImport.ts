@@ -1,7 +1,7 @@
-import { MAX_BACKUP_BYTES, validateData } from "./backup";
+import { MAX_BACKUP_BYTES, validateData, type LegacyV3Session } from "./backup";
 import { parseDate, today } from "./dates";
 import { initialData } from "./library";
-import { saveTemplate } from "./schedule";
+import { revisionForDate, saveTemplate } from "./schedule";
 import { AppData, ExerciseDefinition, WorkoutSession, WorkoutTemplate } from "./types";
 
 export const MAX_WORKOUT_IMPORT_BYTES = MAX_BACKUP_BYTES;
@@ -14,7 +14,7 @@ export interface WorkoutImport {
   scheduleStartDate?: string;
   exercises: ExerciseDefinition[];
   templates: WorkoutTemplate[];
-  sessions: WorkoutSession[];
+  sessions: (WorkoutSession | LegacyV3Session)[];
 }
 export interface WorkoutImportConflict {
   kind: "exercise-id" | "plan-id" | "workout-id" | "occupied-date" | "exercise-reference" | "schedule";
@@ -61,7 +61,8 @@ function utf8Bytes(text: string): number {
 }
 
 /** Only training data is accepted; profile, measurements and credentials are not an import format. */
-export function validateWorkoutImport(value: unknown): WorkoutImport {
+type PreparedWorkoutImport = Omit<WorkoutImport, "sessions"> & { sessions: WorkoutSession[] };
+export function validateWorkoutImport(value: unknown): PreparedWorkoutImport {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("expected an object.");
   const item = value as Record<string, unknown>;
   const required = ["type", "version", "sourceId", "importId", "exercises", "templates", "sessions"];
@@ -80,10 +81,18 @@ export function validateWorkoutImport(value: unknown): WorkoutImport {
   }
   if (!Array.isArray(item.templates) || item.templates.length > 1000) fail("templates must contain at most 1,000 plans.");
   const base = initialData();
+  if (!Array.isArray(item.sessions)) fail("sessions must be an array.");
+  const sessions = item.sessions.map(session => {
+    if (!session || typeof session !== "object" || Array.isArray(session)) fail("each workout must be an object.");
+    if ("routineOccurrence" in session && session.routineOccurrence !== null)
+      fail("imported workouts cannot contain routine occurrence links.");
+    // Legacy imports cannot prove a reopened workout was never finished; protect their dates and records.
+    return { ...session, hasFinished: "hasFinished" in session ? session.hasFinished : true, routineOccurrence: null };
+  });
   try {
     // Existing backup validation covers exercise definitions and exact historical
     // snapshots without accepting any profile or body-weight data from the file.
-    validateData({ ...base, exercises: item.exercises, sessions: item.sessions });
+    validateData({ ...base, exercises: item.exercises, sessions });
     const ids = new Set<string>();
     for (const template of item.templates) {
       // Validate plans separately so overlapping requested schedules can be
@@ -97,7 +106,7 @@ export function validateWorkoutImport(value: unknown): WorkoutImport {
     if (message.startsWith("Invalid workout import:")) throw error;
     fail(message.replace(/^Invalid backup: /, ""));
   }
-  return value as WorkoutImport;
+  return { ...item, sessions } as PreparedWorkoutImport;
 }
 
 export function parseWorkoutImport(text: string): WorkoutImport {
@@ -157,6 +166,7 @@ function prepareWorkoutImport(current: AppData, value: WorkoutImport, localToday
     exercisesAdded: 0, plansAdded: 0, workoutsAdded: 0, duplicatesSkipped: 0,
     plansUnscheduled: 0, conflicts: [], requiresUnscheduledConsent: false,
   };
+  const flexible = revisionForDate(current, localToday)?.routine.mode === "flexible";
   let next = current;
   const exercises = new Map(current.exercises.map(exercise => [exercise.id, exercise]));
   const blockedExercises = new Set<string>();
@@ -198,7 +208,14 @@ function prepareWorkoutImport(current: AppData, value: WorkoutImport, localToday
       continue;
     }
     const added = clone(template);
-    if (!added.archived && added.weekdays.length) {
+    if (flexible && !added.archived && added.weekdays.length) {
+      next = { ...next, templates: [...next.templates, unscheduled(added)] };
+      preview.plansUnscheduled += 1;
+      preview.requiresUnscheduledConsent = true;
+      preview.conflicts.push({ kind: "schedule", id: template.id, date: effectiveDate,
+        message: "Plan “" + template.title + "” will be added on demand. Your flexible routine and its progress will stay unchanged.",
+      });
+    } else if (!added.archived && added.weekdays.length) {
       try {
         next = saveTemplate(next, added, effectiveDate);
       } catch (error) {

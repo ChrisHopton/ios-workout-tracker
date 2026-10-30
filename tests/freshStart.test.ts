@@ -68,7 +68,7 @@ test("atomic reset clears personal journal and queues, keeps quota and permanent
       assert.equal(sql.native.prepare("SELECT COUNT(*) AS count FROM " + table).get()!.count, 0);
     assert.equal(sql.native.prepare("SELECT counter FROM upload_sequence").get()!.counter, 0);
     assert.equal(sql.native.prepare("SELECT attempts FROM upload_budget").get()!.attempts, 10);
-    assert.equal(sql.native.prepare("PRAGMA user_version").get()!.user_version, 6);
+    assert.equal(sql.native.prepare("PRAGMA user_version").get()!.user_version, 7);
     const next = { ...initialData(), settings: { ...initialData().settings, firstName: "New profile" } }; await store.write(next);
     sql.native.exec("PRAGMA user_version = 5;");
     const restarted = createJournalStorage(sql.db, options());

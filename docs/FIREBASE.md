@@ -2,9 +2,9 @@
 
 Workout saves the journal locally in SQLite and automatically uploads a reporting copy from the private iPhone app. Users complete a required device profile but do not sign in, paste connection codes, or configure a database. The phone number is unverified metadata, never an authorization key. Each new installation obtains an anonymous Firebase Authentication account and a private upload namespace, with an automatic model-plus-short-ID label. The owner administers Firebase on the PC. The app never reads, lists, downloads, or restores cloud history; a new installation starts with an empty local journal.
 
-Uploaded data includes the phone label, first/last name, phone number, date of birth, gender, optional height, dated body-weight measurements, preferred units, exercises, plans, schedule revisions, workout snapshots, and sets. Firebase project configuration and API keys identify the project and may ship with the app. Passwords, refresh tokens, owner OAuth tokens, and Admin SDK credentials must never ship in source, app configuration, or `EXPO_PUBLIC_*` variables. Device credentials stay in native SecureStore.
+Uploaded data includes the phone label, first/last name, phone number, date of birth, gender, optional height, dated body-weight measurements, preferred units, exercises, plans, schedule revisions, flexible-routine completion/skip progress, workout snapshots, and sets. Firebase project configuration and API keys identify the project and may ship with the app. Passwords, refresh tokens, owner OAuth tokens, and Admin SDK credentials must never ship in source, app configuration, or `EXPO_PUBLIC_*` variables. Device credentials stay in native SecureStore.
 
-The profile release deliberately resets existing local/reporting data and retires the legacy password-upload paths. Valid anonymous Auth identities and tokens are retained while upload generation/installation identifiers rotate. New credentials are version 3, enrollment bindings version 3, and record envelopes version 2. The same UID-scoped collection layout is retained. Follow [the coordinated reset rollout](PROFILE_RESET.md); do not deploy the old rules or roll back to old app code afterward.
+The current scheduling/recording upgrade preserves local/reporting data and all private upload identities. Credentials remain version 3, enrollment bindings version 3, and record envelopes version 2 in the same UID-scoped collection layout. The rules add only the `schedule_progress` record kind; deploy and verify that allowlist change before checking routine-progress uploads. No owner purge, new enrollment, identity rotation or client reads are required. The earlier [profile reset rollout](PROFILE_RESET.md) retired legacy password paths in a separate one-time cutover; do not repeat it for this upgrade or roll back to pre-cutover code.
 
 ## Owner authentication
 
@@ -65,7 +65,7 @@ The new rules reject legacy upload paths and old envelope versions, and deny aut
 
 ## Initial App Check setup (new projects only)
 
-For the existing enforced project, keep enforcement enabled and follow [profile reset rollout](PROFILE_RESET.md) instead. Do not switch it back to monitoring.
+For the existing enforced project, keep enforcement enabled and preserve the enrollment gate and existing identities. Follow the current [upgrade guidance](SIMPLER_RECORDING.md#upgrading-an-existing-phone); do not switch back to monitoring or repeat the earlier profile purge.
 
 Before checking phone metrics, enable monitoring-only mode (UNENFORCED) for Cloud Firestore App Check. An unconfigured service defaults to OFF and collects no verification metrics. Keep automatic enrollment closed during monitoring; only valid production phone evidence, confirmed enforcement and negative-token checks justify opening it. See [enforcement modes](https://firebase.google.com/docs/reference/appcheck/rest/v1/EnforcementMode).
 
@@ -93,13 +93,13 @@ Once open, every genuine private app installation can enroll. There is no first-
 
 A new installation saves its UUID identity and pending enrollment locally, obtains and securely saves anonymous credentials, then commits its immutable root. It activates the initial history upload only after that commit is confirmed. A lost response repeats exactly the saved enrollment. Client reads are unnecessary.
 
-The root at `automaticUploads/{uid}` contains exactly `schemaVersion: 2`, `enabled`, `deviceId`, `generationId`, and `installationId`. Creation requires the same authenticated UID, anonymous sign-in, an open enrollment gate, `enabled: true`, and valid UUIDs. A client can subsequently write only an identical enabled root. The gate controls new creation only: exact enrollment retries and uploads for an existing enabled root continue when it is closed.
+The root at `automaticUploads/{uid}` contains exactly `schemaVersion: 3`, `enabled`, `deviceId`, `generationId`, and `installationId`. Creation requires the same authenticated UID, anonymous sign-in, an open enrollment gate, `enabled: true`, and valid UUIDs. A client can subsequently write only an identical enabled root. The gate controls new creation only: exact enrollment retries and uploads for an existing enabled root continue when it is closed.
 
 Records live under `automaticUploads/{uid}/records/{key}`. Each request must belong to that UID and match all three identities in its enabled root. Two installations choosing identical UUIDs still have separate UID-scoped paths. Reporting must use the full namespace, not UUIDs alone, to distinguish installations.
 
-Both layouts use the existing schema-version-1 record envelope: `schemaVersion`, `deviceId`, `generationId`, `installationId`, `key`, `kind`, `revision`, `deleted`, and `payload`. Revisions must be positive safe integers. A newer revision can replace a record; an exact duplicate is retryable. Changed content at the same revision and older revisions are denied. Deletion uses a retained tombstone with `deleted: true` and an empty payload, preventing stale resurrection. Root/record physical deletion, all client reads/lists, owner metadata writes, and unknown paths are denied.
+The automatic layout uses the schema-version-2 record envelope; legacy layouts are denied. Its fields are `schemaVersion`, `deviceId`, `generationId`, `installationId`, `key`, `kind`, `revision`, `deleted`, and `payload`. Revisions must be positive safe integers. A newer revision can replace a record; an exact duplicate is retryable. Changed content at the same revision and older revisions are denied. Deletion uses a retained tombstone with `deleted: true` and an empty payload, preventing stale resurrection. Root/record physical deletion, all client reads/lists, owner metadata writes, and unknown paths are denied.
 
-The app commits at most ten documents or 256 KiB. Automatic record rules need one root lookup; legacy rules need at most two lookups per write, keeping ten-write commits within the conservative twenty-call bound. The `records` collection-group payload exemption covers both layouts and their nested maps/arrays. See [rule access-call limits](https://firebase.google.com/docs/firestore/security/rules-conditions#access_call_limits) and [map index exemptions](https://firebase.google.com/docs/firestore/query-data/index-overview#automatic_index_exemptions).
+The app commits at most ten documents or 256 KiB. Automatic record rules need one root lookup, keeping ten-write commits within the conservative twenty-call bound; legacy writes are denied. The `records` collection-group payload exemption covers both layouts and their nested maps/arrays. See [rule access-call limits](https://firebase.google.com/docs/firestore/security/rules-conditions#access_call_limits) and [map index exemptions](https://firebase.google.com/docs/firestore/query-data/index-overview#automatic_index_exemptions).
 
 ## Owner listing, labels, and revocation
 
@@ -131,7 +131,7 @@ Legacy password accounts retain the original paths:
 - `devices/{deviceId}/generations/{generationId}`: immutable schema-version-1 installation binding.
 - `devices/{deviceId}/generations/{generationId}/records/{key}`: existing record envelopes.
 
-The original owner commands remain available for maintenance and rollback of previously connected clients:
+The original owner commands remain in the tooling for historical account maintenance. Current rules deny these upload paths; these commands do not enable a supported rollback or current-phone connection:
 
 ```powershell
 npm run firebase:setup -- create --project YOUR_FIREBASE_PROJECT_ID --api-key YOUR_PUBLIC_WEB_API_KEY --output "$env:USERPROFILE\.workout-sync\firebase-devices.json"
@@ -154,9 +154,9 @@ On physical phones, verify native enrollment, initial completion, separate names
 
 ## Reporting and troubleshooting
 
-Record kinds are profile, body_weight, exercise, plan, schedule, schedule_template, workout, workout_exercise, and completion. Body-weight records retain stable IDs, local date, canonical weightKg, and update timestamp. Plan/schedule and workout snapshots preserve their original historical context. Owner reporting must cover both layouts, select enabled current installations/generations as appropriate, and ignore deletion markers for ordinary history views.
+Record kinds are profile, body_weight, exercise, plan, schedule, schedule_template, schedule_progress, workout, workout_exercise, and completion. Body-weight records retain stable IDs, local date, canonical weightKg, and update timestamp. Plan/schedule and workout snapshots preserve their original historical context. Schedule payloads include routine configuration; workout payloads include `hasFinished` and an optional routine occurrence link. A `schedule_progress` document records a completed or skipped occurrence using the stable `routineId:ordinal` source ID. Skips advance the sequence but are not completed workouts. Owner reporting should distinguish legacy retained records from current automatic namespaces, select the relevant installations/generations, and ignore deletion markers for ordinary history views.
 
-For automatic enrollment denials, check App Check enforcement/attestation, the owner gate, anonymous provider configuration, the account UID, and its immutable root. An invalid saved local identity must not be repaired by weakening rules or overwriting a binding. For legacy denials, also check the owner registry and generation binding. For owner tooling errors, verify owner ADC, explicit project, required permissions, and the pinned CLI adapter. Never add request-body or token logging. Keep local history and frozen batches intact while investigating.
+For automatic enrollment denials, check App Check enforcement/attestation, the owner gate, anonymous provider configuration, the account UID, and its immutable root. An invalid saved local identity must not be repaired by weakening rules or overwriting a binding. Legacy writes are intentionally denied; do not weaken rules to resume them. For owner tooling errors, verify owner ADC, explicit project, required permissions, and the pinned CLI adapter. Never add request-body or token logging. Keep local history and frozen batches intact while investigating.
 
 ## Former Google Sheets migration
 

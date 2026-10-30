@@ -1,5 +1,7 @@
-import { addDays, mondayOf, dayDifference, parseDate, weekdayIndex } from "./dates";
-import { AppData, newId, ScheduleRevision, WEEKDAYS, WorkoutTemplate } from "./types";
+import { addDays, mondayOf, dayDifference, parseDate, today, weekdayIndex } from "./dates";
+import { AppData, newId, RoutineSchedule, ScheduleRevision, WEEKDAYS, WorkoutTemplate } from "./types";
+
+import { completedRoutineTemplateForDate, flexibleTemplateForDate, routineAt, routineChangeBlocked } from './routineEngine';
 
 /** Keep editor changes in the pending schedule when a future revision exists. */
 export function planEditEffectiveDate(data: AppData, localDate: string): string {
@@ -35,7 +37,11 @@ export function nextOccurrence(data: AppData, templateId: string, fromDate: stri
     .map((revision) => revision.effectiveDate)]
     .sort((a, b) => a.localeCompare(b));
   for (const start of dates) {
-    for (let offset = 0; offset < 14; offset++) {
+    const routine = routineAt(data, start);
+    const horizon = routine.mode === "flexible"
+      ? Math.ceil(routine.sequence.length / routine.weekdays.length) * 7 + 7
+      : 14;
+    for (let offset = 0; offset <= horizon; offset++) {
       const date = addDays(start, offset);
       if (scheduleForDate(data, date)?.id === templateId) return date;
     }
@@ -58,9 +64,13 @@ export function revisionForDate(
 export function scheduleForDate(
   data: AppData,
   date: string,
+  currentDate: string = today(),
 ): WorkoutTemplate | null {
   const revision = revisionForDate(data, date);
   if (!revision) return null;
+  const completed = completedRoutineTemplateForDate(data, date);
+  if (completed) return completed;
+  if (revision.routine?.mode === 'flexible') return flexibleTemplateForDate(data, revision, date, currentDate);
   const slot = revision.slots.find(
     (candidate) => candidate.weekday === weekdayIndex(date),
   );
@@ -150,7 +160,7 @@ function validateTemplate(data: AppData, template: WorkoutTemplate): void {
   }
 }
 
-function replaceRevision(data: AppData, revision: ScheduleRevision): AppData {
+export function replaceRevision(data: AppData, revision: ScheduleRevision): AppData {
   return {
     ...data,
     scheduleRevisions: [
@@ -162,10 +172,11 @@ function replaceRevision(data: AppData, revision: ScheduleRevision): AppData {
   };
 }
 
-function nextRevision(
+export function nextRevision(
   data: AppData,
   templates: WorkoutTemplate[],
   effectiveDate: string,
+  routine: RoutineSchedule = routineAt(data, effectiveDate),
 ): ScheduleRevision {
   parseDate(effectiveDate);
   const latest = [...data.scheduleRevisions].sort((a, b) =>
@@ -178,7 +189,7 @@ function nextRevision(
   const previous = revisionForDate(data, effectiveDate);
   const anchorMonday = previous?.anchorMonday ?? mondayOf(effectiveDate);
   const active = templates.filter((template) => !template.archived);
-  const slots = Array.from({ length: 7 }, (_, weekday) => {
+  const slots = routine.mode === "flexible" ? [] : Array.from({ length: 7 }, (_, weekday) => {
     return {
       weekday,
       workoutIds: [0, 1].map((week) => {
@@ -194,6 +205,7 @@ function nextRevision(
     };
   });
   return {
+    routine: routine.mode === 'fixed' ? { mode: 'fixed' } : { ...routine, weekdays: [...routine.weekdays], sequence: [...routine.sequence] },
     id: newId("schedule"),
     effectiveDate,
     anchorMonday,
@@ -208,6 +220,15 @@ export function saveTemplate(
   effectiveDate: string,
 ): AppData {
   validateTemplate(data, template);
+  const previous = data.templates.find((item) => item.id === template.id);
+  const fixed = routineAt(data, effectiveDate).mode === "fixed";
+  const changesDates = previous
+    ? JSON.stringify([...previous.weekdays].sort()) !== JSON.stringify([...template.weekdays].sort())
+      || JSON.stringify(previous.recurrence) !== JSON.stringify(template.recurrence)
+      || previous.archived !== template.archived
+    : template.weekdays.length > 0;
+  if (fixed && changesDates && routineChangeBlocked(data))
+    throw new Error("Finish or cancel the unfinished routine workout before changing its schedule.");
   const saved = copyTemplate({
     ...template,
     title: template.title.trim(),
@@ -229,6 +250,11 @@ export function archiveTemplate(
 ): AppData {
   if (!data.templates.some((template) => template.id === id))
     throw new Error("Workout not found.");
+  const activeRoutine = routineAt(data, effectiveDate);
+  if (activeRoutine.mode === "fixed" && data.templates.find((item) => item.id === id)?.weekdays.length && routineChangeBlocked(data))
+    throw new Error("Finish or cancel the unfinished routine workout before changing its schedule.");
+  if (activeRoutine.mode === 'flexible' && activeRoutine.sequence.includes(id))
+    throw new Error('Remove this workout from your routine and choose its replacement before archiving it.');
   const templates = data.templates.map((template) =>
     template.id === id
       ? { ...template, archived: true, updatedAt: new Date().toISOString() }
@@ -247,6 +273,8 @@ export function swapWeekday(
 ): AppData {
   if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6)
     throw new Error("Choose a valid weekday.");
+  if (routineChangeBlocked(data))
+    throw new Error("Finish or cancel the unfinished routine workout before changing its schedule.");
   const revision = nextRevision(data, data.templates, effectiveDate);
   const slot = revision.slots.find((item) => item.weekday === weekday)!;
   if (!slot.workoutIds[0] || !slot.workoutIds[1] || slot.workoutIds[0] === slot.workoutIds[1])

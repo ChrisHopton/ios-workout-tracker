@@ -1,4 +1,5 @@
 import { parseDate, today } from "./dates";
+import { completeRoutineSession, occurrenceForRecording } from "./routine";
 import { numericReps, numericWeight, suggestWeights } from "./recommendations";
 import {
   AppData,
@@ -13,9 +14,11 @@ export function startSession(
   data: AppData,
   template: WorkoutTemplate,
   date: string,
+  currentDate = today(),
 ): { data: AppData; session: WorkoutSession } {
   parseDate(date);
-  if (date > today())
+  parseDate(currentDate);
+  if (date > currentDate)
     throw new Error(
       "Future workouts can be previewed, but recorded only on or after their scheduled day.",
     );
@@ -23,9 +26,17 @@ export function startSession(
   if (existing) return { data, session: existing };
   if (!template.exercises.length)
     throw new Error("This workout has no exercises to record.");
+  const routineOccurrence = occurrenceForRecording(data, template.id, date, currentDate);
+  if (routineOccurrence && data.routineProgress.some((item) => item.routineId === routineOccurrence.routineId && item.ordinal === routineOccurrence.ordinal))
+    throw new Error("This routine workout was already resolved.");
+  if (routineOccurrence && data.sessions.some((item) => item.status === "in_progress"
+    && item.routineOccurrence !== null && !item.hasFinished))
+    throw new Error("Resume or cancel the unfinished routine workout before starting another one.");
   const timestamp = new Date().toISOString();
   const session: WorkoutSession = {
     id: newId("session"),
+    hasFinished: false,
+    routineOccurrence,
     date,
     title: template.title,
     templateId: template.id,
@@ -40,19 +51,14 @@ export function startSession(
       );
       if (!exercise)
         throw new Error("An exercise in this workout is unavailable.");
+      const suggestion = suggestWeights(data, target, exercise, date, data.settings.unit);
       return {
         exercise: { ...exercise },
         target: { ...target },
-        suggestion: suggestWeights(
-          data,
-          target,
-          exercise,
-          date,
-          data.settings.unit,
-        ),
-        sets: Array.from({ length: target.sets }, () => ({
+        suggestion,
+        sets: Array.from({ length: target.sets }, (_, index) => ({
           classification: "working" as const,
-          weight: "",
+          weight: exercise.equipment === "bodyweight" || suggestion.weights[index] == null ? "" : String(suggestion.weights[index]),
           reps: "",
           status: "pending" as const,
         })),
@@ -160,9 +166,11 @@ export function inspectSessionRecording(session: WorkoutSession): {
 export function finishSession(
   session: WorkoutSession,
   skipMissing: boolean,
+  currentDate = today(),
 ): WorkoutSession {
   parseDate(session.date);
-  if (session.date > today())
+  parseDate(currentDate);
+  if (session.date > currentDate)
     throw new Error("Future workouts cannot be completed.");
   if (!session.exercises.length)
     throw new Error("Add an exercise before finishing your workout.");
@@ -192,7 +200,44 @@ export function finishSession(
     ...session,
     exercises,
     status: "completed",
+    hasFinished: true,
     finishedAt: session.finishedAt ?? timestamp,
     updatedAt: timestamp,
+  };
+}
+
+/** Finish the recording and consume its linked occurrence in the same saved transaction. */
+export function finishWorkout(data: AppData, id: string, skipMissing = false, currentDate = today()): AppData {
+  const session = data.sessions.find((item) => item.id === id);
+  if (!session) throw new Error("This workout could not be found.");
+  const finished = finishSession(session, skipMissing, currentDate);
+  const next = { ...data, sessions: data.sessions.map((item) => item.id === id ? finished : item) };
+  return completeRoutineSession(next, finished);
+}
+
+export function canCancelWorkout(session: WorkoutSession): boolean {
+  return !session.hasFinished && session.status === "in_progress";
+}
+
+export function cancelWorkout(data: AppData, id: string): AppData {
+  const session = data.sessions.find((item) => item.id === id);
+  if (!session) throw new Error("This workout could not be found.");
+  if (!canCancelWorkout(session)) throw new Error("A workout that has been finished cannot be cancelled.");
+  return { ...data, sessions: data.sessions.filter((item) => item.id !== id) };
+}
+
+export function moveWorkoutToToday(data: AppData, id: string, currentDate = today()): AppData {
+  parseDate(currentDate);
+  const session = data.sessions.find((item) => item.id === id);
+  if (!session) throw new Error("This workout could not be found.");
+  if (!canCancelWorkout(session)) throw new Error("A workout that has been finished cannot be moved.");
+  if (session.date === currentDate) return data;
+  if (data.sessions.some((item) => item.id !== id && item.date === currentDate))
+    throw new Error("Today already has a workout. Keep the original date or open today's workout.");
+  return {
+    ...data,
+    sessions: data.sessions.map((item) => item.id === id
+      ? { ...item, date: currentDate, updatedAt: new Date().toISOString() }
+      : item),
   };
 }

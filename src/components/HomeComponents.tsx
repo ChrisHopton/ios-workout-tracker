@@ -69,7 +69,7 @@ export function HomeWeekStrip({
         {WEEKDAYS.map((day, index) => {
           const date = addDays(start, index);
           const session = data.sessions.find((item) => item.date === date);
-          const planned = scheduleForDate(data, date);
+          const planned = scheduleForDate(data, date, currentDate);
           const current = selected === date;
           const dateStatus = session?.status === "completed"
             ? "completed"

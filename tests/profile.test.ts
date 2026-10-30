@@ -18,7 +18,7 @@ const draft: ProfileDraft = {
 
 test("new devices have no fabricated personal details or completion", () => {
   const data = initialData();
-  assert.equal(data.schemaVersion, 3);
+  assert.equal(data.schemaVersion, 4);
   assert.equal(data.settings.phoneCountryCode, "+1");
   for (const field of ["firstName", "lastName", "dateOfBirth", "phoneNumber", "gender"] as const)
     assert.equal(data.settings[field], "");
@@ -107,8 +107,9 @@ test("profile editing preserves measurement history and completion does not depe
 test("a v2 import preserves journal and weights, drops age, and requires missing profile information", () => {
   const source = initialData();
   source.bodyWeights = [{ id: "existing-weight", date: "2026-10-27", weightKg: 74.125, updatedAt: timestamp }];
+  const { routineProgress: _progress, ...legacySource } = source;
   const legacy: LegacyV2AppData = {
-    ...source, schemaVersion: 2, settings: { age: "36", gender: "female", heightCm: 170.25, unit: "kg" },
+    ...legacySource, schemaVersion: 2, settings: { age: "36", gender: "female", heightCm: 170.25, unit: "kg" },
   };
   const original = JSON.stringify(legacy);
   assert.equal(validateStoredData(legacy), legacy);
@@ -130,7 +131,7 @@ test("a v2 import preserves journal and weights, drops age, and requires missing
   assert.equal(upgradeData({ ...legacy, settings: { ...legacy.settings, gender: "custom" } }).settings.gender, "");
 });
 
-test("v3 backup validation rejects malformed profile metadata without changing valid set schema", () => {
+test("current backup validation rejects malformed profile metadata without changing valid set schema", () => {
   const data = completeProfile(initialData(), draft, "70", asOf, timestamp);
   for (const patch of [{ phoneNumber: "3125550123" }, { dateOfBirth: "2026-02-30" }, { gender: "female" },
     { firstName: "" }, { profileCompletedAt: "2026-02-30T15:30:00.000Z" }, { age: "36" }])

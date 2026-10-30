@@ -78,7 +78,7 @@ test("browser bootstrap uploads initial history and incremental edits entirely t
       ...data,
       sessions: [{
         id: "history-session", date: "2026-10-18", title: "Previous workout",
-        templateId: "history-plan", unit: "lb" as const, status: "completed" as const,
+        templateId: "history-plan", unit: "lb" as const, status: "completed" as const, hasFinished: true, routineOccurrence: null,
         startedAt: "2026-10-18T12:00:00.000Z", updatedAt: "2026-10-18T12:30:00.000Z",
         finishedAt: "2026-10-18T12:30:00.000Z",
         exercises: [{
@@ -181,7 +181,7 @@ test("browser fresh start removes old content once and preserves the new journal
     storage.setItem("workout-browser-preview-v1", "old or corrupt personal journal");
     storage.setItem("workout-browser-before-v1-to-v2", "private recovery copy");
     const fresh = await loadData();
-    assert.equal(fresh.schemaVersion, 3); assert.equal(fresh.sessions.length, 0); assert.equal(fresh.settings.firstName, "");
+    assert.equal(fresh.schemaVersion, 4); assert.equal(fresh.sessions.length, 0); assert.equal(fresh.settings.firstName, "");
     assert.equal(storage.getItem("workout-browser-preview-v1"), null);
     assert.equal(storage.getItem("workout-browser-before-v1-to-v2"), null);
     const updated = { ...fresh, settings: { ...fresh.settings, firstName: "New profile" } };

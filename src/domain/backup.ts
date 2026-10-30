@@ -1,11 +1,18 @@
+import { routineDueDate } from "./routineEngine";
 import { AppData, EQUIPMENT, MUSCLE_GROUPS, WorkoutRecurrence, WorkoutSession, WorkoutTemplate } from "./types";
-import { addDays } from "./dates";
+import { addDays, weekdayIndex } from "./dates";
 import { templateOccursOn } from "./schedule";
 import { ageFromDateOfBirth, emptyProfileSettings, normalizePhone, validateProfileDraft } from "./profile";
 
 export type LegacyProfileSettings = { age: string; gender: string; heightCm: number | null; unit: AppData["settings"]["unit"] };
-export type LegacyV2AppData = Omit<AppData, "schemaVersion" | "settings"> & { schemaVersion: 2; settings: LegacyProfileSettings };
-export type StoredAppData = AppData | LegacyV2AppData | LegacyAppData;
+export type LegacyV3Session = Omit<WorkoutSession, "hasFinished" | "routineOccurrence">;
+export type LegacyV3AppData = Omit<AppData, "schemaVersion" | "routineProgress" | "scheduleRevisions" | "sessions"> & {
+  schemaVersion: 3;
+  scheduleRevisions: Omit<AppData["scheduleRevisions"][number], "routine">[];
+  sessions: LegacyV3Session[];
+};
+export type LegacyV2AppData = Omit<LegacyV3AppData, "schemaVersion" | "settings"> & { schemaVersion: 2; settings: LegacyProfileSettings };
+export type StoredAppData = AppData | LegacyV3AppData | LegacyV2AppData | LegacyAppData;
 
 export type LegacyTemplate = Omit<WorkoutTemplate, "recurrence">;
 type LegacySessionExercise = Omit<WorkoutSession["exercises"][number], "sets" | "suggestion"> & {
@@ -22,7 +29,7 @@ export type LegacyAppData = Omit<LegacyV2AppData, "schemaVersion" | "bodyWeights
     slots: { weekday: number; workoutIds: string[] }[];
     templates: LegacyTemplate[];
   }[];
-  sessions: (Omit<WorkoutSession, "exercises"> & { exercises: LegacySessionExercise[] })[];
+  sessions: (Omit<LegacyV3Session, "exercises"> & { exercises: LegacySessionExercise[] })[];
 };
 
 export const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
@@ -152,8 +159,9 @@ function target(value: unknown, path: string): ObjectValue {
 function templates(
   value: unknown,
   path: string,
-  version: 1 | 2 | 3,
+  version: 1 | 2 | 3 | 4,
   exerciseIds?: Set<unknown>,
+  checkConflicts = true,
 ): WorkoutTemplate[] {
   const items = array(value, path, 1000).map((value, index) => {
     const at = `${path}[${index}]`;
@@ -230,7 +238,7 @@ function templates(
         .length > 2
     )
       fail(path, `assigns more than two active workouts to weekday ${day}`);
-  if (version >= 2) {
+  if (version >= 2 && checkConflicts) {
     for (let offset = 0; offset < 14; offset++) {
       const date = addDays("2000-01-03", offset);
       if (items.filter((item) => templateOccursOn(item, date)).length > 1)
@@ -247,7 +255,132 @@ function draft(value: unknown, path: string, reps: boolean): string {
     fail(path, "exceeds the supported range");
   return result;
 }
-function validateVersion(value: unknown, version: 1 | 2 | 3, previous?: AppData): ObjectValue {
+function validateRoutine(value: unknown, path: string, snapshots: WorkoutTemplate[]) {
+  const mode = choice((value as ObjectValue | null)?.mode, path + ".mode", ["fixed", "flexible"]);
+  const routine = object(value, path, mode === "fixed" ? ["mode"] : ["mode", "id", "weekdays", "sequence", "startIndex", "startDate"]);
+  if (mode === "fixed") return;
+  string(routine.id, path + ".id", 100);
+  const days = array(routine.weekdays, path + ".weekdays", 7, 1);
+  days.forEach(day => number(day, path + ".weekdays", 0, 6, true));
+  unique(days, path + ".weekdays");
+  const sequence = array(routine.sequence, path + ".sequence", 1000, 1);
+  for (const id of sequence) {
+    string(id, path + ".sequence", 100);
+    if (!snapshots.some(template => template.id === id && !template.archived))
+      fail(path + ".sequence", "must reference active snapshot templates");
+  }
+  number(routine.startIndex, path + ".startIndex", 0, sequence.length - 1, true);
+  date(routine.startDate, path + ".startDate");
+}
+function validateOccurrence(value: unknown, path: string): ObjectValue {
+  const item = object(value, path, ["routineId", "ordinal", "templateId", "dueDate"]);
+  string(item.routineId, path + ".routineId", 100);
+  number(item.ordinal, path + ".ordinal", 0, Number.MAX_SAFE_INTEGER, true);
+  string(item.templateId, path + ".templateId", 100);
+  date(item.dueDate, path + ".dueDate");
+  return item;
+}
+function validateRoutineLinks(data: ObjectValue, revisions: ObjectValue[], sessions: ObjectValue[]) {
+  const routines = new Map<string, AppData["scheduleRevisions"][number]["routine"] & { mode: "flexible" }>();
+  for (const revision of [...revisions].sort((a, b) => String(a.effectiveDate).localeCompare(String(b.effectiveDate)))) {
+    const routine = revision.routine as AppData["scheduleRevisions"][number]["routine"];
+    if (routine.mode !== "flexible") continue;
+    const previous = routines.get(routine.id);
+    if (previous && (previous.startDate !== routine.startDate || previous.startIndex !== routine.startIndex ||
+      JSON.stringify([...previous.weekdays].sort()) !== JSON.stringify([...routine.weekdays].sort()) ||
+      JSON.stringify(previous.sequence) !== JSON.stringify(routine.sequence)))
+      fail("scheduleRevisions.routine", "must keep the same configuration for an existing routine ID");
+    if (!previous && routine.startDate !== revision.effectiveDate)
+      fail("scheduleRevisions.routine.startDate", "must match its first revision effective date");
+    routines.set(routine.id, routine);
+  }
+  function checkOccurrence(item: ObjectValue, path: string) {
+    const routine = routines.get(item.routineId as string);
+    if (!routine) fail(path + ".routineId", "must reference a saved flexible routine");
+    if (routine.sequence[(routine.startIndex + (item.ordinal as number) % routine.sequence.length) % routine.sequence.length] !== item.templateId)
+      fail(path + ".templateId", "must match its routine sequence position");
+    if (String(item.dueDate) < routine.startDate) fail(path + ".dueDate", "must not precede its routine start");
+    if (!routine.weekdays.includes(weekdayIndex(item.dueDate as string)))
+      fail(path + ".dueDate", "must be a selected training weekday");
+  }
+  const progress = array(data.routineProgress, "routineProgress", 20000).map((value, index) => {
+    const path = `routineProgress[${index}]`;
+    const entry = object(value, path, ["id", "routineId", "ordinal", "templateId", "dueDate", "resolvedDate", "resolvedAt", "outcome", "sessionId"]);
+    const occurrence = validateOccurrence({ routineId: entry.routineId, ordinal: entry.ordinal, templateId: entry.templateId, dueDate: entry.dueDate }, path);
+    checkOccurrence(occurrence, path);
+    if (entry.id !== entry.routineId + ":" + entry.ordinal) fail(path + ".id", "must match its routine occurrence key");
+    date(entry.resolvedDate, path + ".resolvedDate");
+    timestamp(entry.resolvedAt, path + ".resolvedAt");
+    choice(entry.outcome, path + ".outcome", ["completed", "skipped"]);
+    if (entry.outcome === "skipped") {
+      if (entry.sessionId !== null) fail(path + ".sessionId", "must be null for a skipped occurrence");
+    } else string(entry.sessionId, path + ".sessionId", 100);
+    return entry;
+  });
+  unique(progress.map(entry => entry.id), "routineProgress.id");
+  const resolved = new Map(progress.map(entry => [entry.id as string, entry]));
+  const counts = new Map<string, number>();
+  const ordinals = new Map<string, ObjectValue[]>();
+  for (const entry of progress) {
+    const id = entry.routineId as string;
+    const values = ordinals.get(id) ?? [];
+    values.push(entry);
+    ordinals.set(id, values);
+  }
+  const routineStarts = new Map([...routines].map(([id, routine]) => [id, routine.startDate]));
+  const dueProgress = progress.map((entry) => ({
+    routineId: entry.routineId as string,
+    outcome: entry.outcome as "completed" | "skipped",
+    resolvedDate: entry.resolvedDate as string,
+  }));
+  function dueAfter(id: string, previous?: ObjectValue): string {
+    return routineDueDate(routines.get(id)!, previous
+      ? { outcome: previous.outcome as "completed" | "skipped", resolvedDate: previous.resolvedDate as string } : null,
+    dueProgress, routineStarts);
+  }
+  const pendingDue = new Map<string, string>();
+  for (const [id, values] of ordinals) {
+    values.sort((a, b) => (a.ordinal as number) - (b.ordinal as number));
+    if (values.some((value, index) => value.ordinal !== index)) fail("routineProgress.ordinal", "must be contiguous from zero for each routine");
+    for (const [index, entry] of values.entries()) {
+      const previous = values[index - 1];
+      if (String(entry.resolvedDate) < String(previous?.resolvedDate ?? routines.get(id)!.startDate))
+        fail("routineProgress.resolvedDate", "must not precede its routine start or previous resolution");
+      if (entry.dueDate !== dueAfter(id, previous))
+        fail("routineProgress.dueDate", "must follow the previous routine resolution");
+    }
+    counts.set(id, values.length);
+    pendingDue.set(id, dueAfter(id, values[values.length - 1]));
+  }
+  const linked = new Set<string>();
+  for (const session of sessions) {
+    if (session.routineOccurrence === null) continue;
+    const occurrence = session.routineOccurrence as ObjectValue;
+    checkOccurrence(occurrence, "sessions.routineOccurrence");
+    const key = occurrence.routineId + ":" + occurrence.ordinal;
+    if (linked.has(key)) fail("sessions.routineOccurrence", "must be unique per routine occurrence");
+    linked.add(key);
+    const completion = resolved.get(key);
+    if (session.hasFinished) {
+      if (!completion || completion.outcome !== "completed" || completion.sessionId !== session.id ||
+        completion.resolvedDate !== session.date || completion.dueDate !== occurrence.dueDate)
+        fail("sessions.routineOccurrence", "must match its recorded completion");
+    } else if (completion || occurrence.ordinal !== (counts.get(occurrence.routineId as string) ?? 0) ||
+      occurrence.dueDate !== (pendingDue.get(occurrence.routineId as string) ?? dueAfter(occurrence.routineId as string))) {
+      fail("sessions.routineOccurrence", "must link to the next unresolved occurrence");
+    }
+  }
+  const byId = new Map(sessions.map(session => [session.id, session]));
+  for (const entry of progress) {
+    if (entry.outcome !== "completed") continue;
+    const session = byId.get(entry.sessionId);
+    const occurrence = session?.routineOccurrence as ObjectValue | null | undefined;
+    if (!session?.hasFinished || !occurrence || occurrence.routineId !== entry.routineId || occurrence.ordinal !== entry.ordinal)
+      fail("routineProgress.sessionId", "must reference its finished linked workout");
+  }
+}
+
+function validateVersion(value: unknown, version: 1 | 2 | 3 | 4, previous?: AppData): ObjectValue {
   const data = object(value, "backup", [
     "schemaVersion",
     "settings",
@@ -256,14 +389,15 @@ function validateVersion(value: unknown, version: 1 | 2 | 3, previous?: AppData)
     "scheduleRevisions",
     "sessions",
     ...(version >= 2 ? ["bodyWeights"] : []),
+    ...(version >= 4 ? ["routineProgress"] : []),
   ]);
   if (data.schemaVersion !== version)
     fail("schemaVersion", `must be ${version}; this backup may need a newer app`);
-  const settings = object(data.settings, "settings", version === 3 ? [
+  const settings = object(data.settings, "settings", version >= 3 ? [
     "phoneCountryCode", "phoneNumber", "firstName", "lastName", "dateOfBirth",
     "gender", "heightCm", "unit", "profileCompletedAt",
   ] : ["age", "gender", "heightCm", "unit"]);
-  if (version === 3) {
+  if (version >= 3) {
     const country = string(settings.phoneCountryCode, "settings.phoneCountryCode", 4);
     if (!/^\+[1-9]\d{0,2}$/.test(country))
       fail("settings.phoneCountryCode", "must be an international country code such as +1");
@@ -318,6 +452,8 @@ function validateVersion(value: unknown, version: 1 | 2 | 3, previous?: AppData)
     "templates",
     version,
     new Set(exercises.map((item) => item.id)),
+    version < 4 || !Array.isArray(data.scheduleRevisions) ||
+      [...data.scheduleRevisions].sort((a, b) => String(b?.effectiveDate).localeCompare(String(a?.effectiveDate)))[0]?.routine?.mode !== "flexible",
   );
   const unchangedRevisions = new Set(previous?.scheduleRevisions.filter(Object.isFrozen));
   const revisions = array(
@@ -334,14 +470,17 @@ function validateVersion(value: unknown, version: 1 | 2 | 3, previous?: AppData)
       "anchorMonday",
       "slots",
       "templates",
+      ...(version >= 4 ? ["routine"] : []),
     ]);
     string(item.id, `${at}.id`, 100);
     date(item.effectiveDate, `${at}.effectiveDate`);
     const anchor = date(item.anchorMonday, `${at}.anchorMonday`);
     if (new Date(`${anchor}T00:00:00.000Z`).getUTCDay() !== 1)
       fail(`${at}.anchorMonday`, "must be a Monday");
-    const snapshots = templates(item.templates, `${at}.templates`, version);
-    const slots = array(item.slots, `${at}.slots`, 7).map((value, index) => {
+    const flexible = version >= 4 && (item.routine as ObjectValue | null)?.mode === "flexible";
+    const snapshots = templates(item.templates, `${at}.templates`, version, undefined, !flexible);
+    if (version >= 4) validateRoutine(item.routine, `${at}.routine`, snapshots);
+    const slots = array(item.slots, `${at}.slots`, flexible ? 0 : 7).map((value, index) => {
       const slotAt = `${at}.slots[${index}]`;
       const slot = object(value, slotAt, ["weekday", "workoutIds"]);
       number(slot.weekday, `${slotAt}.weekday`, 0, 6, true);
@@ -367,7 +506,7 @@ function validateVersion(value: unknown, version: 1 | 2 | 3, previous?: AppData)
       slots.map((slot) => slot.weekday),
       `${at}.slots.weekday`,
     );
-    if (version >= 2) {
+    if (version >= 2 && !flexible) {
       for (let offset = 0; offset < 14; offset++) {
         const day = offset % 7;
         const expected = snapshots.find((snapshot) => templateOccursOn(snapshot, addDays(anchor, offset)))?.id ?? null;
@@ -376,7 +515,7 @@ function validateVersion(value: unknown, version: 1 | 2 | 3, previous?: AppData)
         if (actual !== expected) fail(`${at}.slots`, "must match the snapshot recurrences");
       }
     }
-    for (const snapshot of snapshots.filter((template) => !template.archived))
+    for (const snapshot of snapshots.filter((template) => !flexible && !template.archived))
       for (const day of snapshot.weekdays) {
         if (
           !slots.some(
@@ -417,6 +556,7 @@ function validateVersion(value: unknown, version: 1 | 2 | 3, previous?: AppData)
         "updatedAt",
         "finishedAt",
         "exercises",
+        ...(version >= 4 ? ["hasFinished", "routineOccurrence"] : []),
       ]);
       string(item.id, `${at}.id`, 100);
       date(item.date, `${at}.date`);
@@ -424,6 +564,14 @@ function validateVersion(value: unknown, version: 1 | 2 | 3, previous?: AppData)
       string(item.templateId, `${at}.templateId`, 100);
       choice(item.unit, `${at}.unit`, ["lb", "kg"]);
       choice(item.status, `${at}.status`, ["in_progress", "completed"]);
+      if (version >= 4) {
+        if (typeof item.hasFinished !== "boolean") fail(`${at}.hasFinished`, "must be true or false");
+        if (item.status === "completed" && !item.hasFinished) fail(`${at}.hasFinished`, "must be true for a finished workout");
+        if (item.routineOccurrence !== null) {
+          const occurrence = validateOccurrence(item.routineOccurrence, `${at}.routineOccurrence`);
+          if (occurrence.templateId !== item.templateId) fail(`${at}.routineOccurrence.templateId`, "must match its workout");
+        }
+      }
       timestamp(item.startedAt, `${at}.startedAt`);
       timestamp(item.updatedAt, `${at}.updatedAt`);
       if (item.finishedAt !== null)
@@ -548,11 +696,12 @@ function validateVersion(value: unknown, version: 1 | 2 | 3, previous?: AppData)
     sessions.map((item) => item.date),
     "sessions.date",
   );
+  if (version >= 4) validateRoutineLinks(data, revisions, sessions);
   return data;
 }
 
 export function validateData(value: unknown, previous?: AppData): AppData {
-  return validateVersion(value, 3, previous) as unknown as AppData;
+  return validateVersion(value, 4, previous) as unknown as AppData;
 }
 
 export function validateLegacyData(value: unknown): LegacyAppData {
@@ -563,9 +712,10 @@ export function validateStoredData(value: unknown): StoredAppData {
   if (value && typeof value === "object") {
     if ((value as ObjectValue).schemaVersion === 1) return validateLegacyData(value);
     if ((value as ObjectValue).schemaVersion === 2) return validateVersion(value, 2) as unknown as LegacyV2AppData;
-    if ((value as ObjectValue).schemaVersion === 3) return validateData(value);
+    if ((value as ObjectValue).schemaVersion === 3) return validateVersion(value, 3) as unknown as LegacyV3AppData;
+    if ((value as ObjectValue).schemaVersion === 4) return validateData(value);
   }
-  return fail("schemaVersion", "must be 1, 2, or 3; this backup may need a newer app");
+  return fail("schemaVersion", "must be 1, 2, 3, or 4; this backup may need a newer app");
 }
 
 function upgradedTemplate(template: LegacyTemplate, anchorMonday: string, slots: { weekday: number; workoutIds: string[] }[]): WorkoutTemplate {
@@ -586,9 +736,19 @@ function upgradedTemplate(template: LegacyTemplate, anchorMonday: string, slots:
   return { ...template, weekdays: [...template.weekdays], exercises: template.exercises.map((entry) => ({ ...entry })), recurrence };
 }
 
+function upgradeV3Data(data: LegacyV3AppData): AppData {
+  return validateData({
+    ...data, schemaVersion: 4, routineProgress: [],
+    scheduleRevisions: data.scheduleRevisions.map(revision => ({ ...revision, routine: { mode: "fixed" } })),
+    // Older formats cleared finishedAt when editing, so an in-progress record may have been finished.
+    // Protect every pre-v4 session from destructive cancellation/date moves without changing its status.
+    sessions: data.sessions.map(session => ({ ...session, hasFinished: true, routineOccurrence: null })),
+  });
+}
+
 function upgradeV2Data(data: LegacyV2AppData): AppData {
   const normalizedGender = data.settings.gender.trim().toLowerCase();
-  return validateData({
+  return upgradeV3Data({
     ...data, schemaVersion: 3,
     settings: {
       ...emptyProfileSettings(), heightCm: data.settings.heightCm, unit: data.settings.unit,
@@ -599,7 +759,8 @@ function upgradeV2Data(data: LegacyV2AppData): AppData {
 
 export function upgradeData(value: unknown): AppData {
   const legacy = validateStoredData(value);
-  if (legacy.schemaVersion === 3) return legacy;
+  if (legacy.schemaVersion === 4) return legacy;
+  if (legacy.schemaVersion === 3) return upgradeV3Data(legacy);
   if (legacy.schemaVersion === 2) return upgradeV2Data(legacy);
   const latest = [...legacy.scheduleRevisions].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
   const anchorMonday = latest?.anchorMonday ?? "2000-01-03";

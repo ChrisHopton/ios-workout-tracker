@@ -95,7 +95,7 @@ test("entering either field last completes a set and clearing or invalidating in
   }
 });
 
-test("suggestions remain separate from actual entries until accepted", () => {
+test("existing suggestion snapshots never refill already-created blank entries", () => {
   const { session } = fixture();
   session.exercises[0].suggestion.weights = [100, 100, 100];
   const repsOnly = editSessionSet(session, 0, 0, { reps: "10" });

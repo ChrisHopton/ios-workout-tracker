@@ -1,5 +1,7 @@
 # Required device profile release
 
+Historical October 28 profile cutover: the instructions below describe the separately approved one-time reset. The current [simpler recording and flexible scheduling update](SIMPLER_RECORDING.md) preserves journals and identities that completed this cutover. Do not repeat the purge or reset for that update. A phone that never activated this release still completes its previously approved cutover when updated.
+
 This release removes recording checkboxes and introduces a required device profile. It is an explicitly approved fresh start: old profiles, measurements, custom exercises, plans and history are removed locally and in cloud reporting. Built-in exercise definitions are restored. There is no SMS verification, password, portable login, or cloud download. A phone number is unverified metadata; each installation remains isolated by Firebase Auth and production App Check.
 
 ## Phone behavior

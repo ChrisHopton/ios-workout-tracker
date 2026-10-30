@@ -11,7 +11,7 @@ function result(weight: string, reps = "12", status: RecordedSet["status"] = "co
 }
 function addSession(data: AppData, date: string, sets: RecordedSet[], options: { target?: WorkoutExercise; unit?: Unit; status?: WorkoutSession["status"]; equipment?: "machine" } = {}): AppData {
   const session: WorkoutSession = {
-    id: date, date, title: "Squat", templateId: "squat", unit: options.unit ?? "lb",
+    hasFinished: options.status !== "in_progress", routineOccurrence: null, id: date, date, title: "Squat", templateId: "squat", unit: options.unit ?? "lb",
     status: options.status ?? "completed", startedAt: date + "T12:00:00Z", updatedAt: date + "T13:00:00Z", finishedAt: date + "T13:00:00Z",
     exercises: [{ exercise: { ...data.exercises[0], ...(options.equipment ? { equipment: options.equipment } : {}) },
       target: options.target ?? target, suggestion: { algorithmVersion: 1, weights: [40, 80], reason: "Old snapshot" }, sets }],

@@ -26,7 +26,7 @@ function plan(id = "fixture-plan", weekdays = [0]): WorkoutTemplate {
 }
 function session(id = "fixture-session", date = "2026-10-20", definition = exercise()): WorkoutSession {
   return {
-    id, date, title: "Historical workout", templateId: "fixture-plan", unit: "lb", status: "completed",
+    id, date, title: "Historical workout", templateId: "fixture-plan", unit: "lb", status: "completed", hasFinished: true, routineOccurrence: null,
     startedAt: date + "T12:00:00.000Z", updatedAt: date + "T13:00:00.000Z", finishedAt: date + "T13:00:00.000Z",
     exercises: [{
       exercise: { ...definition },

@@ -1,4 +1,5 @@
-import { AppData, ProfileSettings, WorkoutSession, WorkoutTemplate } from "../domain/types";
+import type { StoredAppData } from "../domain/backup";
+import { ProfileSettings } from "../domain/types";
 import { JsonObject, makeDocumentKey, UploadDocument, UploadKind } from "./protocol";
 
 export interface DocumentDifference extends UploadDocument { deleted: boolean; }
@@ -6,24 +7,24 @@ export type RowDifference = DocumentDifference;
 function document(kind: UploadKind, deviceId: string, source: (string | number)[], payload: JsonObject): UploadDocument {
   return { key: makeDocumentKey(kind, deviceId, ...source), kind, payload };
 }
-function templatePayload(template: WorkoutTemplate): JsonObject {
+function templatePayload(template: StoredAppData["templates"][number]): JsonObject {
   return {
     id: template.id, title: template.title,
     exercises: template.exercises.map((target) => ({ ...target })),
-    weekdays: [...template.weekdays], ...(template.recurrence ? { recurrence: template.recurrence.kind === "legacy"
+    weekdays: [...template.weekdays], ...("recurrence" in template ? { recurrence: template.recurrence.kind === "legacy"
       ? { ...template.recurrence, weekdaysA: [...template.recurrence.weekdaysA], weekdaysB: [...template.recurrence.weekdaysB] }
       : { ...template.recurrence } } : {}), archived: template.archived, updatedAt: template.updatedAt,
   };
 }
-export function makeProfileDocument(settings: ProfileSettings, deviceId: string, label: string): UploadDocument {
+export function makeProfileDocument(settings: ProfileSettings | StoredAppData["settings"], deviceId: string, label: string): UploadDocument {
   return document("profile", deviceId, ["settings"], { phoneLabel: label, ...settings });
 }
 export function makeCompletionDocument(): UploadDocument {
   return { key: "completion", kind: "completion", payload: { initialUploadComplete: true } };
 }
-export function projectMetadata(data: AppData, deviceId: string, label: string): UploadDocument[] {
+export function projectMetadata(data: StoredAppData, deviceId: string, label: string): UploadDocument[] {
   const result = [makeProfileDocument(data.settings, deviceId, label)];
-  for (const entry of data.bodyWeights ?? [])
+  for (const entry of "bodyWeights" in data ? data.bodyWeights : [])
     result.push(document("body_weight", deviceId, [entry.id], { ...entry }));
   data.exercises.forEach((exercise, index) => {
     result.push(document("exercise", deviceId, [exercise.id], { ...exercise, index }));
@@ -36,6 +37,9 @@ export function projectMetadata(data: AppData, deviceId: string, label: string):
       id: revision.id, effectiveDate: revision.effectiveDate, anchorMonday: revision.anchorMonday,
       slots: revision.slots.map((slot) => ({ weekday: slot.weekday, workoutIds: [...slot.workoutIds] })),
       templateCount: revision.templates.length, index,
+      ...("routine" in revision ? { routine: revision.routine.mode === "fixed" ? { mode: "fixed" } : {
+        ...revision.routine, weekdays: [...revision.routine.weekdays], sequence: [...revision.routine.sequence],
+      } } : {}),
     }));
     revision.templates.forEach((template, templateIndex) => {
       result.push(document("schedule_template", deviceId, [revision.id, templateIndex], {
@@ -43,13 +47,16 @@ export function projectMetadata(data: AppData, deviceId: string, label: string):
       }));
     });
   });
+  for (const progress of "routineProgress" in data ? data.routineProgress : [])
+    result.push(document("schedule_progress", deviceId, [progress.id], { ...progress }));
   return result;
 }
-export function projectSession(session: WorkoutSession, deviceId: string): UploadDocument[] {
+export function projectSession(session: StoredAppData["sessions"][number], deviceId: string): UploadDocument[] {
   const result = [document("workout", deviceId, [session.id], {
     id: session.id, date: session.date, title: session.title, templateId: session.templateId,
     unit: session.unit, status: session.status, startedAt: session.startedAt,
     updatedAt: session.updatedAt, finishedAt: session.finishedAt, exerciseCount: session.exercises.length,
+    ...("hasFinished" in session ? { hasFinished: session.hasFinished, routineOccurrence: session.routineOccurrence ? { ...session.routineOccurrence } : null } : {}),
   })];
   session.exercises.forEach((entry, index) => {
     result.push(document("workout_exercise", deviceId, [session.id, index], {
@@ -60,7 +67,7 @@ export function projectSession(session: WorkoutSession, deviceId: string): Uploa
   });
   return result;
 }
-export function projectData(data: AppData, deviceId: string, label: string): UploadDocument[] {
+export function projectData(data: StoredAppData, deviceId: string, label: string): UploadDocument[] {
   const result = projectMetadata(data, deviceId, label);
   for (const session of data.sessions) result.push(...projectSession(session, deviceId));
   return result;

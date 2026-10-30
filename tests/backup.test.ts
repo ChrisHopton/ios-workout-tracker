@@ -24,7 +24,7 @@ function fixture(): AppData {
   data.templates = [template];
   data.scheduleRevisions = [
     {
-      id: "revision-1",
+      id: "revision-1", routine: { mode: "fixed" },
       effectiveDate: "2026-10-10",
       anchorMonday: "2026-10-05",
       slots: [{ weekday: 0, workoutIds: [template.id, template.id] }],
@@ -38,7 +38,7 @@ function fixture(): AppData {
       templateId: template.id,
       title: template.title,
       unit: "kg",
-      status: "in_progress",
+      status: "in_progress", hasFinished: false, routineOccurrence: null,
       startedAt: at,
       updatedAt: at,
       finishedAt: null,
@@ -96,7 +96,7 @@ test("allows unfinished numeric drafts without considering them completed sets",
 test("rejects malformed JSON, versions, missing fields, unknown properties and oversize input", () => {
   assert.throws(() => parseBackup("{"), /not valid JSON/);
   assert.throws(
-    () => parseBackup(JSON.stringify({ ...initialData(), schemaVersion: 4 })),
+    () => parseBackup(JSON.stringify({ ...initialData(), schemaVersion: 5 })),
     /schemaVersion/,
   );
   assert.throws(
@@ -183,14 +183,14 @@ test("rejects more than two workouts per day and inconsistent set/suggestion cou
 });
 test("completed workouts require a finished timestamp and resolved sets", () => {
   rejectsMutation((data) => {
-    data.sessions[0].status = "completed";
+    data.sessions[0].status = "completed"; data.sessions[0].hasFinished = true;
   }, /finishedAt/);
   rejectsMutation((data) => {
-    data.sessions[0].status = "completed";
+    data.sessions[0].status = "completed"; data.sessions[0].hasFinished = true;
     data.sessions[0].finishedAt = at;
   }, /explicitly skipped/);
   const data = fixture();
-  data.sessions[0].status = "completed";
+  data.sessions[0].status = "completed"; data.sessions[0].hasFinished = true;
   data.sessions[0].finishedAt = at;
   data.sessions[0].exercises[0].sets[1].status = "skipped";
   assert.deepEqual(parseBackup(serializeBackup(data)), data);
@@ -228,7 +228,7 @@ test("completed sessions cannot contain only skipped sets or out-of-range loads"
     data.sessions[0].exercises[0].sets[0].weight = "10001";
   }, /must not exceed 10000/);
   rejectsMutation((data) => {
-    data.sessions[0].status = "completed";
+    data.sessions[0].status = "completed"; data.sessions[0].hasFinished = true;
     data.sessions[0].finishedAt = at;
     data.sessions[0].exercises[0].sets.forEach((set) => {
       set.status = "skipped";

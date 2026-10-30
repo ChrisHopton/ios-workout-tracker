@@ -77,6 +77,21 @@ test("Firestore rules deny client reads and isolate authenticated upload namespa
       await assertFails(unsigned.doc(path).get({ source: "server" }));
       await assertSucceeds(phoneA.doc(path).set({ ...value, revision: 2, deleted: true, payload: {} }));
     });
+    await t.test("routine progress keeps the existing upload-only owner and generation fence", async () => {
+      await enroll();
+      const value = { ...record(1, "routine%3A0", "schedule_progress"), payload: {
+        id: "routine:0", routineId: "routine", ordinal: 0, templateId: "plan", dueDate: "2026-10-26",
+        resolvedDate: "2026-10-27", resolvedAt: "2026-10-27T12:00:00.000Z", outcome: "completed", sessionId: "session",
+      } };
+      const path = `${records}/${value.key}`;
+      await assertSucceeds(phoneA.doc(path).set(value));
+      await assertFails(phoneA.doc(path).get({ source: "server" }));
+      await assertFails(phoneB.doc(path).set(value));
+      await assertFails(unsigned.doc(path).set(value));
+      await assertFails(phoneA.doc(path).set({ ...value, revision: 2, generationId: GENERATION_B }));
+      await assertFails(phoneA.doc(path).set({ ...value, revision: 2, installationId: INSTALLATION_B }));
+      await assertSucceeds(phoneA.doc(path).set({ ...value, revision: 2, deleted: true, payload: {} }));
+    });
     await t.test("records require prior enrollment and matching registry namespace and nonce", async () => {
       const value = record();
       await assertFails(phoneA.doc(`${records}/${value.key}`).set(value));

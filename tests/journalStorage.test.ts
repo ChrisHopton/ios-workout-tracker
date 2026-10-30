@@ -55,7 +55,7 @@ test("version one journals reset atomically and release the old copy", async () 
     );
     assert.equal(
       sql.native.prepare("PRAGMA user_version").get()?.user_version,
-      6,
+      7,
     );
     assert.deepEqual(await createJournalStorage(sql.db).load(), initialData());
   } finally {

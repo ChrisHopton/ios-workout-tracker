@@ -1,8 +1,8 @@
 import { FRESH_START_EPOCH } from "../sync/reset";
 import type { ResetIntent } from "../sync/reset";
-import { upgradeData, type StoredAppData } from "../domain/backup";
+import { upgradeData, validateStoredData, type StoredAppData } from "../domain/backup";
 import { initialData } from "../domain/library";
-import { AppData, WorkoutSession } from "../domain/types";
+import { AppData } from "../domain/types";
 import { snapshot } from "./snapshot";
 import { createSyncJournal } from "../sync/journal";
 import type { BootstrapDraft } from "../sync/bootstrap";
@@ -24,7 +24,7 @@ export interface JournalDatabase extends Connection {
   ): Promise<void>;
 }
 interface StoredSession {
-  session: WorkoutSession;
+  session: StoredAppData["sessions"][number];
   position: number;
 }
 
@@ -41,7 +41,7 @@ export function createJournalStorage(db: JournalDatabase, options: { createId?: 
   let metadata = "";
   let sessions = new Map<string, StoredSession>();
 
-  async function write(data: AppData, migrate = false): Promise<void> {
+  async function write(data: AppData, migration?: StoredAppData, upgradeVersion = false): Promise<void> {
     const next = snapshot(data, saved);
     const { sessions: records, ...details } = next;
     const sameMetadata = metadata !== "" && saved &&
@@ -68,7 +68,7 @@ export function createJournalStorage(db: JournalDatabase, options: { createId?: 
       metadata !== nextMetadata ||
       changed.length ||
       removed.length ||
-      migrate
+      migration || upgradeVersion
     ) {
       await db.withExclusiveTransactionAsync(async (tx) => {
         if (metadata !== nextMetadata) {
@@ -87,9 +87,8 @@ export function createJournalStorage(db: JournalDatabase, options: { createId?: 
         }
         for (const id of removed)
           await tx.runAsync("DELETE FROM workout_sessions WHERE id = ?", id);
-        await sync.capture(tx, saved, next);
-        if (migrate) await tx.execAsync("DROP TABLE app_state;");
-        await tx.execAsync("PRAGMA user_version = 6;");
+        await sync.capture(tx, migration ?? saved, next);
+        await tx.execAsync("PRAGMA user_version = 7;");
       });
     }
     // Advance the comparison cache only after the complete transaction succeeds
@@ -113,7 +112,7 @@ export function createJournalStorage(db: JournalDatabase, options: { createId?: 
         await tx.execAsync("DELETE FROM workout_sessions; DELETE FROM journal_meta; DROP TABLE IF EXISTS app_state;");
         await tx.runAsync("INSERT INTO journal_meta (id, value) VALUES (1, ?)", JSON.stringify(details));
         await tx.runAsync("INSERT INTO app_lifecycle (id, epoch, cleanup_complete) VALUES (1, ?, 0)", FRESH_START_EPOCH);
-        await tx.execAsync("PRAGMA user_version = 6;");
+        await tx.execAsync("PRAGMA user_version = 7;");
       });
       saved = undefined; metadata = ""; sessions = new Map();
     }
@@ -127,6 +126,8 @@ export function createJournalStorage(db: JournalDatabase, options: { createId?: 
 
   async function read(): Promise<AppData> {
     await prepareFreshStart();
+    const version = await db.getFirstAsync<{ user_version: number }>("PRAGMA user_version");
+    if (!version || version.user_version > 7) throw new Error("This journal needs a newer app.");
     const row = await db.getFirstAsync<{ value: string }>(
       "SELECT value FROM journal_meta WHERE id = 1",
     );
@@ -138,11 +139,23 @@ export function createJournalStorage(db: JournalDatabase, options: { createId?: 
         ...JSON.parse(row.value),
         sessions: records.map((record) => JSON.parse(record.value)),
       };
-      const next = snapshot(upgradeData(raw));
-      saved = raw as AppData;
+      const stored = validateStoredData(raw);
+      const next = snapshot(upgradeData(stored));
+      const migrating = stored.schemaVersion !== 4;
+      if (migrating) {
+        // Preserve the complete original journal before any migration transaction can run.
+        await db.execAsync("CREATE TABLE IF NOT EXISTS journal_recovery (schema_version INTEGER PRIMARY KEY, value TEXT NOT NULL);");
+        const recovery = await db.getFirstAsync<{ value: string }>("SELECT value FROM journal_recovery WHERE schema_version = ?", stored.schemaVersion);
+        if (recovery) {
+          if (validateStoredData(JSON.parse(recovery.value)).schemaVersion !== stored.schemaVersion)
+            throw new Error("The pre-migration recovery copy needs attention.");
+        } else await db.runAsync("INSERT INTO journal_recovery (schema_version, value) VALUES (?, ?)", stored.schemaVersion, JSON.stringify(stored));
+        await options.beforeMigration?.(stored, stored.schemaVersion, 4);
+      }
+      saved = stored.schemaVersion === 4 ? stored : undefined;
       metadata = row.value;
       sessions = new Map(
-        raw.sessions.map((session: WorkoutSession, index: number) => [
+        stored.sessions.map((session, index) => [
           session.id,
           {
             session,
@@ -150,8 +163,7 @@ export function createJournalStorage(db: JournalDatabase, options: { createId?: 
           },
         ]),
       );
-      await write(next);
-      await db.execAsync("PRAGMA user_version = 6;");
+      await write(next, migrating ? stored : undefined, version.user_version < 7);
       return next;
     }
     throw new Error("The saved journal is missing. Your app data needs attention.");

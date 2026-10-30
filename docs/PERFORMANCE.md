@@ -1,5 +1,19 @@
 # Size and efficiency — October 15, 2026
 
+## Flexible routines and simpler recording — October 29, 2026
+
+Production export with unchanged pinned dependencies: **3,344,199 bytes** Hermes and **3,758,736 bytes** overall, an increase of **61,629 bytes** over the minimal Analytics release. No runtime/native dependencies were added. The installed native fingerprint is unchanged.
+
+Existing synthetic measurements on Windows/Node 24.19.0 (`scripts/measure.ts`, `scripts/measureRecording.ts`):
+
+- 1,000 workouts × six exercises × three sets: local edit median **0.660 ms**, queued-upload edit **0.797 ms**.
+- Twenty local edits wrote **74,460 bytes** across 20 session statements; twenty connected edits wrote **96,313 bytes** across 80 journal/queue statements.
+- Baseline SQLite allocation **4,186,112 bytes**; peak initial-upload allocation **10,420,224 bytes**; retained after mocked acknowledgment drain **4,808,704 bytes**. Initial queue **7,038 documents**; repeated changes coalesced to one pending document.
+- Validation medians with 1,000 workouts and 100/500 schedule revisions: **0.501 / 0.595 ms**, respectively. Metadata serialization remains shared when unchanged.
+
+These are synthetic desktop timing/storage measurements, not native iPhone latency or installed IPA sizes. Migration tests separately cover original-journal recovery, transaction rollback/retry, stable identities and immutable in-flight batches. Analytics focus gating remains unchanged and covered by regression tests.
+
+
 ## Minimal Analytics measurements — October 29, 2026
 
 Measured on Windows with the same pinned dependencies and production export command before/after this change:

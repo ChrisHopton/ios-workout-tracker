@@ -8,9 +8,27 @@ Record device, iOS version, build number, tester, and date here:
 - Build:
 - Tester / date:
 
-## Current update - minimal Analytics
+## Current update - simpler recording and flexible scheduling
 
-This update preserves the current SQLite 6 / journal 3 data and private upload identity. Do not repeat the earlier profile reset. Installed-device checks remain pending until performed.
+See [feature and migration guidance](SIMPLER_RECORDING.md). Existing post-profile journals migrate to SQLite 7 / journal 4 with the same identity; do not repeat the earlier profile reset. Record actual results for each phone separately.
+
+- [ ] Install over an existing journal with profile, measurements, imported history and pending uploads. Verify all recorded values, suggestions and historical warm-ups survive; no onboarding/reset appears on a phone that completed the profile cutover.
+- [ ] Activate the update offline, restart after migration, then reconnect. Verify the same upload identity and subsequent incremental uploads without duplicate records or a repeated migration.
+- [ ] Verify fixed Weekly/Every 2 weeks dates and historical schedules remain unchanged. Switch to flexible mode, select training days, repeated plans, starting workout and date, and review the preview.
+- [ ] Complete a flexible workout, edit it and finish it again: advance exactly once. Make up an overdue occurrence, then exercise Skip and continue; skips must not count as completed workouts or sets.
+- [ ] Resume an unfinished routine workout before starting another. Try keeping its date and moving to today; reject an occupied today. Changing routine structure while an unfinished linked workout exists must not strand the draft.
+- [ ] New workouts fill available suggested weights once with blank reps; bodyweight/no-history weights stay blank. Clear or override a value, save and resume: no refill or overwrite occurs.
+- [ ] New sets have no Warm-up/Working switch or suggestion-accept control. Historical warm-up labels and results remain intact. NEXT STEP fits small/large text layouts and explains the suggestion.
+- [ ] Cancel a new unfinished workout, decline and then confirm: declining retains it, confirming removes it without advancing the routine. Completed and reopened completed workouts cannot be canceled or moved.
+- [ ] Older migrated drafts remain editable/finishable but cannot be canceled or moved; this protection must not make unfinished workouts count as completed in Analytics.
+- [ ] Simulate a save/migration failure in a development build: journal, progress and upload changes remain consistent; original data/recovery copy survive, inputs remain available and Retry succeeds.
+- [ ] Import a prepared file while flexible mode is active: preview explains on-demand plans, consent is required, and existing routine revisions/progress remain unchanged. Reimport adds no duplicates.
+- [ ] Verify keyboard behavior, light/dark appearance, Dynamic Type, VoiceOver, confirmation sheets and 44-point controls on small and large iPhones.
+- [ ] Owner verifies schedule_progress and linked workout updates under the existing UID, with all app reads/lists/deletes still denied. Browser sync is mock-only.
+
+## Earlier update - minimal Analytics
+
+That earlier update preserved SQLite 6 / journal 3 data and the private upload identity. Do not repeat the earlier profile reset. Installed-device checks remain pending until performed.
 
 - [ ] Analytics shows two totals, Last workout completed, and one carousel; no recent-exercise, comparison or detail-screen links remain.
 - [ ] The last workout follows its recorded date, not an imported timestamp, and remains visible outside the chosen period. Viewing it does not reopen it; editing still does.
@@ -22,7 +40,7 @@ This update preserves the current SQLite 6 / journal 3 data and private upload i
 
 ## Earlier rollout - required device profiles
 
-Use [profile reset rollout](PROFILE_RESET.md) for the exact cutover and per-phone acceptance. First-phone uploads were verified before this release; profile-release acceptance is separate and must be recorded again. Keep both apps installed and pause recording until the new profile form appears.
+Historical cutover checks only; do not repeat them for this update. Use [profile reset rollout](PROFILE_RESET.md) for a phone that has never activated that earlier release. First-phone uploads were verified before this release; profile-release acceptance is separate and must be recorded again. Keep both apps installed and pause recording until the new profile form appears.
 
 - [ ] Updated app resets old local data once and shows required profile onboarding.
 - [ ] Profile and starting weight persist before Home opens; failure preserves inputs and Retry works.
@@ -52,7 +70,7 @@ Use [profile reset rollout](PROFILE_RESET.md) for the exact cutover and per-phon
 
 - [ ] Rapidly enter, change, and clear weights/reps; wait for Saved. Navigate away and return; values must match exactly.
 - [ ] Force-close and reopen after Saved; unfinished workouts resume with no duplicate session.
-- [ ] Accept a suggestion, override it, and confirm actual values remain distinct from the suggestion until accepted.
+- [ ] Start a new workout with suggested weights seeded once and blank reps. Override/clear values, save and resume; actuals must remain exactly as entered.
 - [ ] Verify no completion checkboxes remain; valid actual weight/reps count automatically. Finish with missing sets asks before skipping; cancel retains the draft. Invalid entered values must be corrected or cleared. Reopen a finished workout and edit it.
 - [ ] Dumbbell loads say per dumbbell, barbell loads include the bar, and bodyweight exercises accept reps without a weight.
 - [ ] When testing storage failure in a development build, show a visible error and Retry, then recover the latest values once storage works. Inject an upload-state database read failure and confirm the journal and outbox both roll back, then both save on retry.
@@ -70,9 +88,9 @@ Use [profile reset rollout](PROFILE_RESET.md) for the exact cutover and per-phon
 
 ## Automatic private uploads
 
-Follow the staged owner rollout in [Firestore setup](FIREBASE.md). Emulator tests do not establish native attestation. Do not enable automatic enrollment until Firestore App Check enforcement and real-service rejection checks pass.
+Keep the existing enforced project and enrollment settings in place. The initial staged owner rollout in [Firestore setup](FIREBASE.md) applies only where setup is incomplete; do not repeat it for this update. Emulator tests do not establish native attestation.
 
-- [ ] Install a compatible OTA or signed build over the existing app on both phones. The earlier required-profile release cleared old local history once; this Analytics update does not reset data. Verify both UDIDs and production App Attest entitlement in the signed profile.
+- [ ] Install a compatible OTA or signed build over the existing app on both phones. The earlier required-profile release cleared old local history once; this scheduling/recording update does not add a reset. Verify both UDIDs and production App Attest entitlement in the signed profile.
 - [ ] Open each phone online and verify valid App Attest token metrics. Confirm no debug provider or tokens are configured.
 - [ ] Enforce Firestore App Check, verify missing/invalid tokens fail in the real service, then enable automatic enrollment using the owner tool.
 - [ ] Settings has the gender selector, disclosure and compact read-only upload status; no database forms, code entry, rename, replacement or Disconnect controls.
@@ -91,8 +109,8 @@ Follow the staged owner rollout in [Firestore setup](FIREBASE.md). Emulator test
 ## Updates and internal migration safeguards
 
 - [ ] Confirm Settings offers the additive Import plans and workouts control, with no full backup/export/recovery controls.
-- [ ] Install a newer preview build over the app with the same identifier; the authorized profile migration moves to SQLite version 6 and journal format 3, clearing old history once. Verify no new recovery copy of deliberately deleted data is created and existing app-managed recovery copies are removed. No user-facing restore workflow is expected.
-- [ ] On an OTA-enabled test build with a matching runtime, verify this one-time profile update resets old journal data while retaining proven anonymous authentication. Later compatible updates must retain the new journal and must not repeat the reset. A build lacking required native modules must use a new binary.
+- [ ] Install over the app with the same identifier; the current migration moves to SQLite 7 and journal 4, preserving all journal records and an internal pre-migration recovery copy. Failed migration leaves the original journal intact. No user-facing restore workflow is expected.
+- [ ] On an OTA-enabled test build with a matching runtime, verify the update preserves the permanent profile-cutover marker, account, device/generation/installation IDs, quotas and frozen retry batch. Restart must not repeat migration or reset. A build lacking required native modules must use a compatible new binary.
 - [ ] Record installed app and Documents & Data sizes in iPhone Storage before and after adding representative history. Check recording and chart responsiveness on the phone.
 - [ ] If using a second phone, verify it has separate data and works offline.
 
@@ -104,7 +122,7 @@ Open issues / screenshots / results:
 - [ ] A lone Every 2 weeks plan keeps its rest week; opposite-week plans share a day; conflicts show inline without modifying other plans.
 - [ ] Existing irregular schedules keep their dates while editing names/exercises; selecting a new frequency changes dates only from today.
 - [ ] Record 40 lb × 12 and 80 lb × 10 for an 8–12 target; the next session suggests 75 lb at a 5 lb increment, with an explanation.
-- [ ] Warm-up labels persist and exclude those sets from progression/working-set totals. No effort input is required.
+- [ ] Historical warm-up labels persist and exclude those sets from progression/working-set totals. New sets are working sets; no classification or effort input is shown.
 - [ ] Check two-workout increases and reductions, unit changes, historical dates, skipped sets, and long gaps.
 - [ ] Add/edit/delete dated body weights only in Settings; units preserve canonical kg and measurements remain available for private uploads.
 - [ ] Read volume, workout counts, muscle-group sets and empty states with large text and both themes.

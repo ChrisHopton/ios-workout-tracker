@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { homeDayPresentation } from "../src/components/homePresentation";
 import { initialData } from "../src/domain/library";
+import { saveRoutine } from "../src/domain/routine";
 import { saveTemplate } from "../src/domain/schedule";
-import { editSessionSet, finishSession, startSession } from "../src/domain/sessions";
+import { editSessionSet, finishSession, finishWorkout, startSession } from "../src/domain/sessions";
 import { WorkoutTemplate } from "../src/domain/types";
 
 const monday = "2025-01-06";
@@ -105,3 +106,54 @@ test("Home progress follows edits to a resumed workout and distinguishes zero fr
   assert.equal(homeDayPresentation(data, monday, monday).completedSets, 1);
   assert.equal(homeDayPresentation(data, monday, monday).actionLabel, "Resume workout");
 });
+
+test("Home retains Rest day and Choose workout while an overdue flexible workout awaits the next training day", () => {
+  const data = flexibleHome();
+  const before = structuredClone(data);
+  const day = homeDayPresentation(data, "2025-01-07", "2025-01-07");
+  assert.equal(day.title, "Rest day"); assert.equal(day.actionLabel, "Choose workout");
+  assert.equal(day.template, null); assert.equal(day.missed, null); assert.equal(day.continueWith, null);
+  assert.equal(day.upcoming?.template.id, "A"); assert.equal(day.upcoming?.date, "2025-01-08");
+  assert.deepEqual(data, before);
+  const chosen = startSession(data, data.templates[0], "2025-01-07", "2025-01-07");
+  assert.equal(chosen.session.routineOccurrence?.templateId, "A", "choosing the next plan on a rest day still links it");
+  const recorded = editSessionSet(chosen.session, 0, 0, { weight: "80", reps: "8" });
+  const finished = finishWorkout({ ...chosen.data, sessions: [recorded] }, recorded.id, true, "2025-01-07");
+  assert.equal(finished.routineProgress.length, 1);
+  assert.equal(homeDayPresentation(finished, "2025-01-07", "2025-01-07").upcoming?.template.id, "B");
+});
+
+test("Home offers make-up and skip/continue on a selected training day without advancing during presentation", () => {
+  const data = flexibleHome();
+  const before = structuredClone(data);
+  const day = homeDayPresentation(data, "2025-01-08", "2025-01-08");
+  assert.equal(day.title, "A"); assert.equal(day.actionLabel, "Make up A");
+  assert.equal(day.continueWith?.title, "B"); assert.equal(day.missed?.occurrence.dueDate, monday);
+  assert.deepEqual(data, before);
+});
+
+test("Home resumes an earlier linked draft instead of creating a second make-up", () => {
+  const data = flexibleHome();
+  const started = startSession(data, data.templates[0], monday, monday);
+  const day = homeDayPresentation(started.data, "2025-01-07", "2025-01-07");
+  assert.equal(day.session?.id, started.session.id);
+  assert.equal(day.isCarryover, true); assert.equal(day.canCancel, true);
+  assert.equal(day.actionLabel, "Resume workout"); assert.equal(day.missed, null);
+  assert.equal(day.unfinished.length, 0);
+});
+
+test("Home surfaces other unfinished days and retains historical edit cancellation protection", () => {
+  const started = startSession(scheduled(), workout, monday);
+  const day = homeDayPresentation(started.data, "2025-01-08", "2025-01-08");
+  assert.equal(day.unfinished[0].id, started.session.id);
+  const finished = finishSession(editSessionSet(started.session, 0, 0, { weight: "100", reps: "8" }), true);
+  const edited = editSessionSet(finished, 0, 0, { reps: "9" });
+  const historical = homeDayPresentation({ ...started.data, sessions: [edited] }, monday, "2025-01-08");
+  assert.equal(historical.actionLabel, "Resume workout"); assert.equal(historical.canCancel, false);
+});
+
+function flexibleHome() {
+  const data = initialData();
+  data.templates = ["A", "B", "C"].map((title) => ({ ...workout, id: title, title, weekdays: [] }));
+  return saveRoutine(data, { mode: "flexible", weekdays: [0, 2, 4], sequence: ["A", "B", "C"], startIndex: 0 }, monday, monday);
+}
