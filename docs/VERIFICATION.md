@@ -8,7 +8,7 @@ Scope: fixed/flexible routine selection, completion/skip progress, make-up handl
 
 | Check | Result / evidence |
 | --- | --- |
-| Final source commit | Pending |
+| Final source commit | `1ab66954abab08c0784723861de854bf5440fb2a`, pushed to origin/main |
 | Full application suite | `npm test`: 441 passed, zero failed, one emulator-only skip (442 total) |
 | TypeScript and ESLint | Full `tsc --noEmit` and `eslint . --no-cache` passed |
 | Firestore emulator | 23 passed: schedule_progress ownership/identity, denied reads, exact retries, stale revisions, atomic failures and legacy rejection |
@@ -18,9 +18,11 @@ Scope: fixed/flexible routine selection, completion/skip progress, make-up handl
 | Runtime fingerprint and compatible signed preview build | `fb7bcde4bd5d1e33aeaf92dd7a6756200ad39d06`; matches finished build `00474cfc-0dd6-45d3-ada1-f19e7e2b7e3a` |
 | Synthetic browser checks | 375/393/440 px widths, dark mode, no horizontal overflow and 44-point new controls; autofill once, cleared-weight restart, Save and leave, missing-set cancel, confirmed draft cancellation, cross-date resume, seeded order/preview/save, discard protection and selected radio state verified. Uploads mocked; native keyboard, larger text, light mode and VoiceOver pending |
 | Firestore rules deployment | Firebase CLI compiled and released rules to workout-bb5a2 on October 30 UTC. Only schedule_progress allowlist addition; no gate, identity, enforcement, billing or data changes |
-| Preview EAS update group / iOS update ID | Pending |
+| Preview EAS update group / iOS update ID | Published: group `a01b6aa5-d1d4-4fc0-8a75-2b0507178feb`; iOS update `01a18a46-27e8-7350-bd94-b8258d91c5f9`; runtime matches the installed preview build |
 | First iPhone activation | Pending: installed update, preserved journal/identity, native checks and uploads |
 | Second iPhone activation | Pending independently; an offline phone is not verified by the first phone |
+
+Release: [Expo preview update](https://expo.dev/accounts/chrishopton/projects/workout-personal/updates/a01b6aa5-d1d4-4fc0-8a75-2b0507178feb). The EAS export used source-map packaging; the size comparison above uses the separate standard production export consistently. Open Workout online, allow the update to download, then close and reopen it. Settings > Uploads should show an update ID starting `01a18a46`. Do not uninstall.
 
 No reinstall, current-journal reset or cloud download is part of this upgrade. The existing profile-cutover epoch remains unchanged; a phone that never activated that earlier release still completes its previously approved one-time cutover. Use the [device checklist](DEVICE_CHECKLIST.md) and preserve private values outside this report.
 
